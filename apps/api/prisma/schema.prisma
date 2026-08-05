@@ -1,0 +1,1049 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum UserStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+}
+
+enum SupplierStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
+enum PurchaseRequestStatus {
+  DRAFT
+  SUBMITTED
+  BUYER_REVIEW
+  NEED_CLARIFICATION
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum Priority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum RfqStatus {
+  DRAFT
+  SENT
+  CLOSED
+  AWARDED
+  CANCELLED
+}
+
+enum RfqSupplierStatus {
+  INVITED
+  VIEWED
+  QUOTED
+  DECLINED
+}
+
+enum QuotationStatus {
+  DRAFT
+  SUBMITTED
+  SHORTLISTED
+  AWARDED
+  REJECTED
+}
+
+enum ContractStatus {
+  DRAFT
+  ACTIVE
+  EXPIRING
+  EXPIRED
+  TERMINATED
+  RENEWED
+}
+
+enum CertificateStatus {
+  VALID
+  EXPIRING
+  EXPIRED
+  REVOKED
+}
+
+enum ApprovalDecision {
+  PENDING
+  APPROVED
+  REJECTED
+  CLARIFICATION_REQUESTED
+  SKIPPED
+}
+
+enum FieldType {
+  TEXT
+  TEXTAREA
+  NUMBER
+  DECIMAL
+  DATE
+  DATETIME
+  SELECT
+  MULTISELECT
+  CHECKBOX
+  RADIO
+  FILE
+  EMAIL
+  URL
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+}
+
+enum NotificationEvent {
+  PR_SUBMITTED
+  PR_NEED_CLARIFICATION
+  PR_APPROVED
+  PR_REJECTED
+  RFQ_SENT
+  QUOTATION_SUBMITTED
+  PO_ISSUED
+  PO_ACKNOWLEDGED
+  PO_CANCELLED
+  SUPPLIER_APPROVED
+  SUPPLIER_REJECTED
+  CONTRACT_EXPIRY
+  CERTIFICATE_EXPIRY
+  APPROVAL_REQUESTED
+  COMMENT_ADDED
+}
+
+enum ReminderStatus {
+  PENDING
+  SENT
+  CANCELLED
+  FAILED
+}
+
+enum EntityType {
+  PURCHASE_REQUEST
+  RFQ
+  QUOTATION
+  PURCHASE_ORDER
+  SUPPLIER
+  CONTRACT
+  CERTIFICATE
+  USER
+  CATEGORY
+}
+
+enum PurchaseOrderStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  ISSUED
+  ACKNOWLEDGED
+  PARTIALLY_RECEIVED
+  COMPLETED
+  CANCELLED
+}
+
+// ---------------------------------------------------------------------------
+// Identity & access control (RBAC)
+// ---------------------------------------------------------------------------
+
+model Role {
+  id          String    @id @default(uuid())
+  name        String    @unique
+  code        String    @unique
+  description String?
+  isSystem    Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  permissions   RolePermission[]
+  users         UserRole[]
+  approvalSteps ApprovalStep[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(uuid())
+  code        String   @unique // e.g. "purchase_request:approve"
+  module      String
+  action      String
+  description String?
+  createdAt   DateTime @default(now())
+
+  roles RolePermission[]
+
+  @@index([module])
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model User {
+  id           String     @id @default(uuid())
+  email        String     @unique
+  passwordHash String
+  fullName     String
+  phone        String?
+  jobTitle     String?
+  avatarUrl    String?
+  status       UserStatus @default(ACTIVE)
+  locale       String     @default("vi")
+  mfaSecret    String?
+  mfaEnabled   Boolean    @default(false)
+  lastLoginAt  DateTime?
+  departmentId String?
+  supplierId   String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  department Department? @relation(fields: [departmentId], references: [id])
+  supplier   Supplier?   @relation(fields: [supplierId], references: [id])
+
+  roles              UserRole[]
+  refreshTokens      RefreshToken[]
+  managedDepartments Department[]          @relation("DepartmentManager")
+  purchaseRequests   PurchaseRequest[]     @relation("PurchaseRequestRequester")
+  assignedRequests   PurchaseRequest[]     @relation("PurchaseRequestBuyer")
+  approvalHistories  ApprovalHistory[]
+  rfqsCreated        Rfq[]                 @relation("RfqBuyer")
+  comments           Comment[]
+  notifications      Notification[]
+  uploads            Attachment[]
+  auditLogs          AuditLog[]
+  activityLogs       ActivityLog[]
+  contractsOwned     Contract[]            @relation("ContractBuyer")
+  purchaseOrders     PurchaseOrder[]       @relation("PurchaseOrderBuyer")
+  performanceReviews SupplierPerformance[]
+
+  @@index([departmentId])
+  @@index([supplierId])
+  @@map("users")
+}
+
+model UserRole {
+  userId String
+  roleId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  userAgent String?
+  ipAddress String?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// ---------------------------------------------------------------------------
+// Organisation
+// ---------------------------------------------------------------------------
+
+model Department {
+  id        String    @id @default(uuid())
+  name      String
+  code      String    @unique
+  managerId String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  manager          User?             @relation("DepartmentManager", fields: [managerId], references: [id])
+  users            User[]
+  purchaseRequests PurchaseRequest[]
+  contracts        Contract[]
+
+  @@map("departments")
+}
+
+model Project {
+  id        String    @id @default(uuid())
+  name      String
+  code      String    @unique
+  startDate DateTime?
+  endDate   DateTime?
+  budget    Decimal?  @db.Decimal(18, 2)
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  purchaseRequests PurchaseRequest[]
+
+  @@map("projects")
+}
+
+// ---------------------------------------------------------------------------
+// Categories & dynamic forms
+// ---------------------------------------------------------------------------
+
+model Category {
+  id          String    @id @default(uuid())
+  name        String
+  nameEn      String?
+  code        String    @unique
+  description String?
+  parentId    String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryTree")
+
+  dynamicForms       DynamicForm[]
+  purchaseRequests   PurchaseRequest[]
+  supplierCategories SupplierCategory[]
+  contracts          Contract[]
+
+  @@index([parentId])
+  @@map("categories")
+}
+
+model DynamicForm {
+  id         String    @id @default(uuid())
+  categoryId String
+  name       String
+  version    Int       @default(1)
+  isActive   Boolean   @default(true)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+
+  category Category       @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  fields   DynamicField[]
+
+  @@unique([categoryId, version])
+  @@map("dynamic_forms")
+}
+
+model DynamicField {
+  id           String    @id @default(uuid())
+  formId       String
+  key          String
+  label        String
+  labelEn      String?
+  type         FieldType
+  placeholder  String?
+  helpText     String?
+  isRequired   Boolean   @default(false)
+  sortOrder    Int       @default(0)
+  options      Json? // for SELECT / MULTISELECT / RADIO: [{ value, label }]
+  validation   Json? // { min, max, minLength, maxLength, pattern }
+  defaultValue String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  form   DynamicForm         @relation(fields: [formId], references: [id], onDelete: Cascade)
+  values DynamicFieldValue[]
+
+  @@unique([formId, key])
+  @@index([formId])
+  @@map("dynamic_fields")
+}
+
+model DynamicFieldValue {
+  id                String  @id @default(uuid())
+  fieldId           String
+  purchaseRequestId String
+  value             String? @db.Text
+
+  field           DynamicField    @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  purchaseRequest PurchaseRequest @relation(fields: [purchaseRequestId], references: [id], onDelete: Cascade)
+
+  @@unique([purchaseRequestId, fieldId])
+  @@index([purchaseRequestId])
+  @@map("dynamic_field_values")
+}
+
+// ---------------------------------------------------------------------------
+// Purchase requests
+// ---------------------------------------------------------------------------
+
+model PurchaseRequest {
+  id                String                @id @default(uuid())
+  code              String                @unique // PR-2026-00001
+  title             String
+  description       String?               @db.Text
+  reason            String?               @db.Text
+  status            PurchaseRequestStatus @default(DRAFT)
+  priority          Priority              @default(NORMAL)
+  requesterId       String
+  departmentId      String
+  projectId         String?
+  categoryId        String
+  buyerId           String?
+  neededByDate      DateTime?
+  budgetAmount      Decimal?              @db.Decimal(18, 2)
+  currency          String                @default("VND")
+  estimatedTotal    Decimal?              @db.Decimal(18, 2)
+  submittedAt       DateTime?
+  reviewedAt        DateTime?
+  approvedAt        DateTime?
+  rejectedAt        DateTime?
+  rejectReason      String?               @db.Text
+  clarificationNote String?               @db.Text
+  slaDueAt          DateTime?
+
+  // Chuoi duyet duoc chot tai thoi diem gui, de thay doi cau hinh ve sau
+  // khong lam lech tien trinh cua cac yeu cau dang chay.
+  approvalWorkflowId String?
+  currentStepId      String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  requester  User       @relation("PurchaseRequestRequester", fields: [requesterId], references: [id])
+  buyer      User?      @relation("PurchaseRequestBuyer", fields: [buyerId], references: [id])
+  department Department @relation(fields: [departmentId], references: [id])
+  project    Project?   @relation(fields: [projectId], references: [id])
+  category   Category   @relation(fields: [categoryId], references: [id])
+
+  approvalWorkflow ApprovalWorkflow? @relation(fields: [approvalWorkflowId], references: [id])
+  currentStep      ApprovalStep?     @relation("CurrentStep", fields: [currentStepId], references: [id])
+
+  items             PurchaseRequestItem[]
+  dynamicValues     DynamicFieldValue[]
+  approvalHistories ApprovalHistory[]
+  rfqs              Rfq[]
+  purchaseOrders    PurchaseOrder[]
+  comments          Comment[]
+  attachments       Attachment[]
+
+  @@index([status])
+  @@index([requesterId])
+  @@index([buyerId])
+  @@index([categoryId])
+  @@index([departmentId])
+  @@map("purchase_requests")
+}
+
+model PurchaseRequestItem {
+  id                String   @id @default(uuid())
+  purchaseRequestId String
+  lineNo            Int
+  name              String
+  description       String?  @db.Text
+  specification     String?  @db.Text
+  quantity          Decimal  @db.Decimal(18, 3)
+  unit              String
+  estimatedPrice    Decimal? @db.Decimal(18, 2)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  purchaseRequest PurchaseRequest @relation(fields: [purchaseRequestId], references: [id], onDelete: Cascade)
+  quotationItems  QuotationItem[]
+
+  @@unique([purchaseRequestId, lineNo])
+  @@index([purchaseRequestId])
+  @@map("purchase_request_items")
+}
+
+// ---------------------------------------------------------------------------
+// Approval workflow (configurable, multi-level, threshold based)
+// ---------------------------------------------------------------------------
+
+model ApprovalWorkflow {
+  id           String    @id @default(uuid())
+  name         String
+  description  String?
+  categoryId   String?
+  departmentId String?
+  minAmount    Decimal?  @db.Decimal(18, 2)
+  maxAmount    Decimal?  @db.Decimal(18, 2)
+  currency     String    @default("VND")
+  isActive     Boolean   @default(true)
+  priority     Int       @default(0) // higher wins when several match
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+
+  steps            ApprovalStep[]
+  purchaseRequests PurchaseRequest[]
+
+  @@map("approval_workflows")
+}
+
+model ApprovalStep {
+  id          String   @id @default(uuid())
+  workflowId  String
+  stepOrder   Int
+  name        String
+  roleId      String?
+  isMandatory Boolean  @default(true)
+  slaHours    Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workflow        ApprovalWorkflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  role            Role?             @relation(fields: [roleId], references: [id])
+  histories       ApprovalHistory[]
+  currentRequests PurchaseRequest[] @relation("CurrentStep")
+
+  @@unique([workflowId, stepOrder])
+  @@map("approval_steps")
+}
+
+model ApprovalHistory {
+  id                String           @id @default(uuid())
+  purchaseRequestId String
+  stepId            String?
+  actorId           String
+  decision          ApprovalDecision
+  comment           String?          @db.Text
+  fromStatus        String?
+  toStatus          String?
+  createdAt         DateTime         @default(now())
+
+  purchaseRequest PurchaseRequest @relation(fields: [purchaseRequestId], references: [id], onDelete: Cascade)
+  step            ApprovalStep?   @relation(fields: [stepId], references: [id])
+  actor           User            @relation(fields: [actorId], references: [id])
+
+  @@index([purchaseRequestId])
+  @@map("approval_histories")
+}
+
+// ---------------------------------------------------------------------------
+// Suppliers
+// ---------------------------------------------------------------------------
+
+model Supplier {
+  id            String         @id @default(uuid())
+  code          String         @unique
+  companyName   String
+  taxCode       String?        @unique
+  address       String?
+  country       String?
+  website       String?
+  email         String
+  contactPerson String?
+  phone         String?
+  bankAccount   String?
+  bankName      String?
+  swiftCode     String?
+  paymentTerm   String?
+  mainProducts  String?        @db.Text
+  mainServices  String?        @db.Text
+  status        SupplierStatus @default(PENDING)
+  approvedAt    DateTime?
+  rejectReason  String?        @db.Text
+  ratingAvg     Decimal?       @db.Decimal(4, 2)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  users          User[]
+  categories     SupplierCategory[]
+  rfqInvites     RfqSupplier[]
+  quotations     SupplierQuotation[]
+  contracts      Contract[]
+  purchaseOrders PurchaseOrder[]
+  certificates   Certificate[]
+  attachments    Attachment[]
+  performances   SupplierPerformance[]
+
+  @@index([status])
+  @@map("suppliers")
+}
+
+model SupplierCategory {
+  supplierId String
+  categoryId String
+  createdAt  DateTime @default(now())
+
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([supplierId, categoryId])
+  @@map("supplier_categories")
+}
+
+model SupplierPerformance {
+  id               String   @id @default(uuid())
+  supplierId       String
+  evaluatorId      String
+  periodStart      DateTime
+  periodEnd        DateTime
+  priceScore       Int // 1..5
+  qualityScore     Int
+  deliveryScore    Int
+  responseScore    Int
+  cooperationScore Int
+  complaintRate    Decimal  @default(0) @db.Decimal(5, 2)
+  totalScore       Decimal  @db.Decimal(5, 2)
+  note             String?  @db.Text
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  supplier  Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  evaluator User     @relation(fields: [evaluatorId], references: [id])
+
+  @@index([supplierId])
+  @@map("supplier_performances")
+}
+
+// ---------------------------------------------------------------------------
+// RFQ & quotations
+// ---------------------------------------------------------------------------
+
+model Rfq {
+  id                 String    @id @default(uuid())
+  code               String    @unique // RFQ-2026-00001
+  title              String
+  purchaseRequestId  String
+  buyerId            String
+  status             RfqStatus @default(DRAFT)
+  instructions       String?   @db.Text
+  dueDate            DateTime?
+  sentAt             DateTime?
+  closedAt           DateTime?
+  awardedAt          DateTime?
+  awardedQuotationId String?   @unique
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  purchaseRequest  PurchaseRequest    @relation(fields: [purchaseRequestId], references: [id])
+  buyer            User               @relation("RfqBuyer", fields: [buyerId], references: [id])
+  awardedQuotation SupplierQuotation? @relation("AwardedQuotation", fields: [awardedQuotationId], references: [id])
+
+  suppliers      RfqSupplier[]
+  quotations     SupplierQuotation[] @relation("RfqQuotations")
+  purchaseOrders PurchaseOrder[]
+  attachments    Attachment[]
+  comments       Comment[]
+
+  @@index([status])
+  @@index([purchaseRequestId])
+  @@map("rfqs")
+}
+
+model RfqSupplier {
+  id             String            @id @default(uuid())
+  rfqId          String
+  supplierId     String
+  status         RfqSupplierStatus @default(INVITED)
+  invitedAt      DateTime          @default(now())
+  viewedAt       DateTime?
+  declinedReason String?
+
+  rfq      Rfq      @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@unique([rfqId, supplierId])
+  @@map("rfq_suppliers")
+}
+
+model SupplierQuotation {
+  id           String          @id @default(uuid())
+  code         String          @unique
+  rfqId        String
+  supplierId   String
+  status       QuotationStatus @default(DRAFT)
+  currency     String          @default("VND")
+  totalAmount  Decimal         @default(0) @db.Decimal(18, 2)
+  moq          String?
+  leadTimeDays Int?
+  paymentTerm  String?
+  incoterm     String?
+  validUntil   DateTime?
+  warranty     String?
+  deliveryTerm String?
+  remark       String?         @db.Text
+  submittedAt  DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  rfq      Rfq      @relation("RfqQuotations", fields: [rfqId], references: [id], onDelete: Cascade)
+  supplier Supplier @relation(fields: [supplierId], references: [id])
+
+  items          QuotationItem[]
+  attachments    Attachment[]
+  purchaseOrders PurchaseOrder[]
+  awardedFor     Rfq?            @relation("AwardedQuotation")
+
+  @@unique([rfqId, supplierId])
+  @@index([status])
+  @@map("supplier_quotations")
+}
+
+model QuotationItem {
+  id                    String   @id @default(uuid())
+  quotationId           String
+  purchaseRequestItemId String?
+  lineNo                Int
+  name                  String
+  description           String?  @db.Text
+  quantity              Decimal  @db.Decimal(18, 3)
+  unit                  String
+  unitPrice             Decimal  @db.Decimal(18, 2)
+  lineTotal             Decimal  @db.Decimal(18, 2)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  quotation           SupplierQuotation    @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  purchaseRequestItem PurchaseRequestItem? @relation(fields: [purchaseRequestItemId], references: [id])
+
+  @@unique([quotationId, lineNo])
+  @@index([quotationId])
+  @@map("quotation_items")
+}
+
+// ---------------------------------------------------------------------------
+// Purchase orders
+// ---------------------------------------------------------------------------
+
+/**
+ * Issued against an awarded quotation: the lines and the agreed unit prices are
+ * copied from the winning quotation at generation time, so later edits to the
+ * quotation cannot silently change what was ordered.
+ */
+model PurchaseOrder {
+  id     String              @id @default(uuid())
+  code   String              @unique // PO-2026-00001
+  title  String
+  status PurchaseOrderStatus @default(DRAFT)
+
+  purchaseRequestId String
+  rfqId             String?
+  quotationId       String?
+  supplierId        String
+  buyerId           String
+
+  currency    String  @default("VND")
+  subtotal    Decimal @default(0) @db.Decimal(18, 2)
+  taxRate     Decimal @default(0) @db.Decimal(5, 2)
+  taxAmount   Decimal @default(0) @db.Decimal(18, 2)
+  totalAmount Decimal @default(0) @db.Decimal(18, 2)
+
+  paymentTerm     String?
+  incoterm        String?
+  deliveryTerm    String?
+  warranty        String?
+  deliveryDate    DateTime?
+  deliveryAddress String?   @db.Text
+  note            String?   @db.Text
+
+  issuedAt       DateTime?
+  acknowledgedAt DateTime?
+  completedAt    DateTime?
+  cancelledAt    DateTime?
+  cancelReason   String?   @db.Text
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  purchaseRequest PurchaseRequest    @relation(fields: [purchaseRequestId], references: [id])
+  rfq             Rfq?               @relation(fields: [rfqId], references: [id])
+  quotation       SupplierQuotation? @relation(fields: [quotationId], references: [id])
+  supplier        Supplier           @relation(fields: [supplierId], references: [id])
+  buyer           User               @relation("PurchaseOrderBuyer", fields: [buyerId], references: [id])
+
+  items       PurchaseOrderItem[]
+  attachments Attachment[]
+
+  @@index([status])
+  @@index([supplierId])
+  @@index([purchaseRequestId])
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderItem {
+  id              String  @id @default(uuid())
+  purchaseOrderId String
+  lineNo          Int
+  name            String
+  description     String? @db.Text
+  specification   String? @db.Text
+  quantity        Decimal @db.Decimal(18, 3)
+  unit            String
+  unitPrice       Decimal @db.Decimal(18, 2)
+  lineTotal       Decimal @db.Decimal(18, 2)
+  receivedQty     Decimal @default(0) @db.Decimal(18, 3)
+
+  purchaseRequestItemId String?
+  quotationItemId       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+
+  @@unique([purchaseOrderId, lineNo])
+  @@index([purchaseOrderId])
+  @@map("purchase_order_items")
+}
+
+// ---------------------------------------------------------------------------
+// Contracts & certificates
+// ---------------------------------------------------------------------------
+
+model Contract {
+  id             String         @id @default(uuid())
+  contractNumber String         @unique
+  title          String
+  supplierId     String
+  categoryId     String?
+  departmentId   String?
+  buyerId        String?
+  startDate      DateTime
+  endDate        DateTime
+  currency       String         @default("VND")
+  contractValue  Decimal        @db.Decimal(18, 2)
+  renewalOption  Boolean        @default(false)
+  status         ContractStatus @default(DRAFT)
+  note           String?        @db.Text
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  supplier   Supplier    @relation(fields: [supplierId], references: [id])
+  category   Category?   @relation(fields: [categoryId], references: [id])
+  department Department? @relation(fields: [departmentId], references: [id])
+  buyer      User?       @relation("ContractBuyer", fields: [buyerId], references: [id])
+
+  attachments Attachment[]
+  reminders   ReminderQueue[]
+
+  @@index([status])
+  @@index([supplierId])
+  @@index([endDate])
+  @@map("contracts")
+}
+
+model Certificate {
+  id         String            @id @default(uuid())
+  name       String
+  type       String?
+  supplierId String
+  issuedBy   String?
+  issueDate  DateTime
+  expiryDate DateTime
+  status     CertificateStatus @default(VALID)
+  note       String?           @db.Text
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  supplier    Supplier        @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  attachments Attachment[]
+  reminders   ReminderQueue[]
+
+  @@index([supplierId])
+  @@index([expiryDate])
+  @@map("certificates")
+}
+
+model ReminderQueue {
+  id            String         @id @default(uuid())
+  entityType    EntityType
+  contractId    String?
+  certificateId String?
+  daysBefore    Int
+  remindAt      DateTime
+  status        ReminderStatus @default(PENDING)
+  sentAt        DateTime?
+  error         String?        @db.Text
+  createdAt     DateTime       @default(now())
+
+  contract    Contract?    @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  certificate Certificate? @relation(fields: [certificateId], references: [id], onDelete: Cascade)
+
+  @@index([status, remindAt])
+  @@map("reminder_queue")
+}
+
+// ---------------------------------------------------------------------------
+// Files, comments, notifications
+// ---------------------------------------------------------------------------
+
+model Attachment {
+  id           String     @id @default(uuid())
+  fileName     String
+  originalName String
+  mimeType     String
+  size         Int
+  storageKey   String // key in S3-compatible storage
+  version      Int        @default(1)
+  parentId     String? // previous version
+  entityType   EntityType
+  documentType String? // BUSINESS_LICENSE, ISO, QUOTATION, CONTRACT, ...
+  uploadedById String
+
+  purchaseRequestId String?
+  rfqId             String?
+  quotationId       String?
+  supplierId        String?
+  contractId        String?
+  certificateId     String?
+  purchaseOrderId   String?
+
+  createdAt DateTime  @default(now())
+  deletedAt DateTime?
+
+  uploadedBy      User               @relation(fields: [uploadedById], references: [id])
+  parent          Attachment?        @relation("AttachmentVersions", fields: [parentId], references: [id])
+  versions        Attachment[]       @relation("AttachmentVersions")
+  purchaseRequest PurchaseRequest?   @relation(fields: [purchaseRequestId], references: [id], onDelete: Cascade)
+  rfq             Rfq?               @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  quotation       SupplierQuotation? @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  supplier        Supplier?          @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  contract        Contract?          @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  certificate     Certificate?       @relation(fields: [certificateId], references: [id], onDelete: Cascade)
+  purchaseOrder   PurchaseOrder?     @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+
+  @@index([entityType])
+  @@index([purchaseRequestId])
+  @@index([supplierId])
+  @@map("attachments")
+}
+
+model Comment {
+  id                String     @id @default(uuid())
+  body              String     @db.Text
+  authorId          String
+  entityType        EntityType
+  purchaseRequestId String?
+  rfqId             String?
+  isInternal        Boolean    @default(false)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  author          User             @relation(fields: [authorId], references: [id])
+  purchaseRequest PurchaseRequest? @relation(fields: [purchaseRequestId], references: [id], onDelete: Cascade)
+  rfq             Rfq?             @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+
+  @@index([purchaseRequestId])
+  @@map("comments")
+}
+
+model Notification {
+  id         String              @id @default(uuid())
+  userId     String
+  event      NotificationEvent
+  channel    NotificationChannel @default(IN_APP)
+  title      String
+  body       String              @db.Text
+  link       String?
+  entityType EntityType?
+  entityId   String?
+  readAt     DateTime?
+  sentAt     DateTime?
+  createdAt  DateTime            @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+  @@map("notifications")
+}
+
+model EmailTemplate {
+  id        String            @id @default(uuid())
+  event     NotificationEvent @unique
+  subject   String
+  bodyHtml  String            @db.Text
+  locale    String            @default("vi")
+  isActive  Boolean           @default(true)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  @@map("email_templates")
+}
+
+// ---------------------------------------------------------------------------
+// Audit & settings
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  action    String // CREATE / UPDATE / DELETE / APPROVE ...
+  module    String
+  entityId  String?
+  oldValue  Json?
+  newValue  Json?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([module, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model ActivityLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  action     String
+  path       String?
+  method     String?
+  statusCode Int?
+  durationMs Int?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([createdAt])
+  @@map("activity_logs")
+}
+
+model Setting {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       Json
+  description String?
+  updatedAt   DateTime @updatedAt
+
+  @@map("settings")
+}

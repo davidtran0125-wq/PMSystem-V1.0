@@ -1,0 +1,68 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "1. Tạo file cấu hình (.env)",
+      "type": "shell",
+      "command": "node scripts/setup-env.mjs",
+      "problemMatcher": []
+    },
+    {
+      "label": "2. Cài đặt thư viện",
+      "type": "shell",
+      "command": "npm install --prefix apps/api && npm install --prefix apps/web",
+      "problemMatcher": []
+    },
+    {
+      "label": "3. Khởi động database (Docker)",
+      "type": "shell",
+      "command": "docker compose up -d",
+      "problemMatcher": []
+    },
+    {
+      "label": "4. Tạo bảng và dữ liệu mẫu",
+      "type": "shell",
+      "command": "npx prisma generate && npx prisma migrate deploy && npm run db:seed",
+      "options": {
+        "cwd": "${workspaceFolder}/apps/api"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "5. Chạy API",
+      "type": "shell",
+      "command": "npm run start:dev",
+      "options": {
+        "cwd": "${workspaceFolder}/apps/api"
+      },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "6. Chạy Web",
+      "type": "shell",
+      "command": "npm run dev",
+      "options": {
+        "cwd": "${workspaceFolder}/apps/web"
+      },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "Xem database (Prisma Studio)",
+      "type": "shell",
+      "command": "npx prisma studio",
+      "options": {
+        "cwd": "${workspaceFolder}/apps/api"
+      },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "🔍 Kiểm tra lỗi cài đặt",
+      "type": "shell",
+      "command": "node scripts/doctor.mjs",
+      "problemMatcher": []
+    }
+  ]
+}
