@@ -19,6 +19,11 @@ import { PurchaseOrderStatus } from '@prisma/client';
 import { PaginationDto } from '../../../common/dto/pagination.dto';
 
 export class PurchaseOrderItemDto {
+  @ApiPropertyOptional({ description: 'Mã vật tư trong danh mục' })
+  @IsOptional()
+  @IsUUID()
+  materialId?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsInt()
@@ -121,8 +126,17 @@ export class CreateFromRfqDto extends PurchaseOrderHeaderDto {
   rfqId!: string;
 
   @ApiPropertyOptional({
+    description:
+      'Báo giá trúng thầu để tạo đơn. Bắt buộc khi RFQ có nhiều nhà cung cấp trúng thầu.',
+  })
+  @IsOptional()
+  @IsUUID()
+  quotationId?: string;
+
+  @ApiPropertyOptional({
     type: [PurchaseOrderItemDto],
-    description: 'Bỏ trống để lấy nguyên dòng hàng và đơn giá từ báo giá trúng thầu',
+    description:
+      'Bỏ trống để lấy nguyên dòng hàng và đơn giá từ báo giá trúng thầu',
   })
   @IsOptional()
   @IsArray()
@@ -171,6 +185,14 @@ export class CancelPurchaseOrderDto {
   reason!: string;
 }
 
+export class ReviewOrderDto {
+  @ApiPropertyOptional({ description: 'Bắt buộc khi từ chối' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  comment?: string;
+}
+
 export class QueryPurchaseOrderDto extends PaginationDto {
   @ApiPropertyOptional({ enum: PurchaseOrderStatus })
   @IsOptional()
@@ -181,4 +203,16 @@ export class QueryPurchaseOrderDto extends PaginationDto {
   @IsOptional()
   @IsUUID()
   supplierId?: string;
+
+  @ApiPropertyOptional({ description: 'Lọc các đơn hàng sinh ra từ một RFQ' })
+  @IsOptional()
+  @IsUUID()
+  rfqId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Lọc các đơn hàng của một yêu cầu mua hàng',
+  })
+  @IsOptional()
+  @IsUUID()
+  purchaseRequestId?: string;
 }

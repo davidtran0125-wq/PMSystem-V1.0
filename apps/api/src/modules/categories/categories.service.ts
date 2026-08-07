@@ -200,4 +200,70 @@ export class CategoriesService {
 
     return form;
   }
+
+  /** Mọi phiên bản biểu mẫu còn sống của một lĩnh vực, mới nhất lên đầu. */
+  async formVersions(categoryId: string) {
+    await this.findOne(categoryId);
+    const forms = await this.prisma.dynamicForm.findMany({
+      where: { categoryId, deletedAt: null },
+      orderBy: { version: 'desc' },
+      include: { _count: { select: { fields: true } } },
+    });
+    return forms.map((f) => ({
+      id: f.id,
+      name: f.name,
+      version: f.version,
+      isActive: f.isActive,
+      fieldCount: f._count.fields,
+      createdAt: f.createdAt,
+    }));
+  }
+
+  /**
+   * Xóa mềm một phiên bản biểu mẫu. Nếu lỡ xóa đúng phiên bản đang dùng thì
+   * phiên bản còn lại mới nhất được đưa lên thay, để lĩnh vực không bị mất
+   * biểu mẫu một cách âm thầm.
+   */
+  async removeForm(categoryId: string, formId: string, userId: string) {
+    const form = await this.prisma.dynamicForm.findFirst({
+      where: { id: formId, categoryId, deletedAt: null },
+      include: { fields: { orderBy: { sortOrder: 'asc' } } },
+    });
+    if (!form) throw new NotFoundException('Dynamic form not found');
+
+    const promoted = await this.prisma.$transaction(async (tx) => {
+      await tx.dynamicForm.update({
+        where: { id: formId },
+        data: { deletedAt: new Date(), isActive: false },
+      });
+
+      if (!form.isActive) return null;
+      const next = await tx.dynamicForm.findFirst({
+        where: { categoryId, deletedAt: null, id: { not: formId } },
+        orderBy: { version: 'desc' },
+      });
+      if (!next) return null;
+      await tx.dynamicForm.update({
+        where: { id: next.id },
+        data: { isActive: true },
+      });
+      return next;
+    });
+
+    await this.audit.record({
+      userId,
+      action: 'DELETE',
+      module: 'dynamic_form',
+      entityId: formId,
+      oldValue: {
+        categoryId,
+        name: form.name,
+        version: form.version,
+        fields: form.fields.length,
+      },
+      newValue: promoted ? { activeVersion: promoted.version } : undefined,
+    });
+
+    return { success: true, activeVersion: promoted?.version ?? null };
+  }
 }

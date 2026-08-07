@@ -1,25 +1,56 @@
 'use client';
 
 import Link from 'next/link';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Card,
   EmptyState,
   PageHeader,
+  Pagination,
   Skeleton,
+  StatusFilterBar,
 } from '@/components/ui';
 import { QuotationStatusBadge } from '@/components/status-badge';
 import { api } from '@/lib/api';
 import { formatCurrency, formatDateTime } from '@/lib/utils';
-import type { Paginated, Quotation } from '@/lib/types';
+import type { Paginated, Quotation, QuotationStatus } from '@/lib/types';
+
+const STATUSES: { value: QuotationStatus | ''; label: string }[] = [
+  { value: '', label: 'Tất cả' },
+  { value: 'DRAFT', label: 'Nháp' },
+  { value: 'SUBMITTED', label: 'Đã gửi' },
+  { value: 'SHORTLISTED', label: 'Vào danh sách ngắn' },
+  { value: 'AWARDED', label: 'Trúng thầu' },
+  { value: 'REJECTED', label: 'Không trúng' },
+];
 
 export default function SupplierQuotationsPage() {
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [status, setStatus] = useState('');
+
+  /** Đếm trên toàn bộ báo giá của mình, không riêng trang đang xem. */
+  const counts = useQuery({
+    queryKey: ['my-quotation-counts'],
+    queryFn: async () =>
+      (
+        await api.get<{ total: number; counts: Record<QuotationStatus, number> }>(
+          '/rfqs/my-quotations/status-counts',
+        )
+      ).data,
+  });
+
   const { data, isLoading } = useQuery({
-    queryKey: ['my-quotations'],
+    queryKey: ['my-quotations', { page, pageSize, status }],
     queryFn: async () =>
       (
         await api.get<Paginated<Quotation>>('/rfqs/my-quotations', {
-          params: { pageSize: 50 },
+          params: {
+            page,
+            pageSize,
+            ...(status ? { quotationStatus: status } : {}),
+          },
         })
       ).data,
   });
@@ -29,6 +60,18 @@ export default function SupplierQuotationsPage() {
       <PageHeader
         title="Báo giá của tôi"
         description="Lịch sử báo giá đã gửi cho bên mua."
+      />
+
+      <StatusFilterBar
+        options={STATUSES}
+        value={status}
+        onChange={(v) => {
+          setStatus(v);
+          setPage(1);
+        }}
+        counts={counts.data?.counts}
+        total={counts.data?.total}
+        isLoading={counts.isLoading}
       />
 
       {isLoading ? (
@@ -46,14 +89,14 @@ export default function SupplierQuotationsPage() {
         <Card className="overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="border-b border-border bg-muted/50 text-left">
+              <thead className="border-y border-border bg-muted/40 text-left">
                 <tr>
-                  <th className="px-4 py-3 font-medium">Mã báo giá</th>
-                  <th className="px-4 py-3 font-medium">RFQ</th>
-                  <th className="px-4 py-3 font-medium">Tổng giá trị</th>
-                  <th className="px-4 py-3 font-medium">Giao hàng</th>
-                  <th className="px-4 py-3 font-medium">Ngày gửi</th>
-                  <th className="px-4 py-3 font-medium">Trạng thái</th>
+                  <th className="cell-head">Mã báo giá</th>
+                  <th className="cell-head">RFQ</th>
+                  <th className="cell-head">Tổng giá trị</th>
+                  <th className="cell-head">Giao hàng</th>
+                  <th className="cell-head">Ngày gửi</th>
+                  <th className="cell-head">Trạng thái</th>
                 </tr>
               </thead>
               <tbody>
@@ -62,8 +105,8 @@ export default function SupplierQuotationsPage() {
                     key={q.id}
                     className="border-b border-border last:border-0 hover:bg-accent/50"
                   >
-                    <td className="px-4 py-3 font-medium">{q.code}</td>
-                    <td className="px-4 py-3">
+                    <td className="cell font-medium">{q.code}</td>
+                    <td className="cell">
                       {q.rfq ? (
                         <Link
                           href={`/supplier/rfqs/${q.rfq.id}`}
@@ -75,16 +118,16 @@ export default function SupplierQuotationsPage() {
                         '—'
                       )}
                     </td>
-                    <td className="px-4 py-3 tabular-nums">
+                    <td className="cell tabular-nums">
                       {formatCurrency(q.totalAmount, q.currency)}
                     </td>
-                    <td className="px-4 py-3 tabular-nums">
+                    <td className="cell tabular-nums">
                       {q.leadTimeDays ? `${q.leadTimeDays} ngày` : '—'}
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground">
+                    <td className="cell text-muted-foreground">
                       {formatDateTime(q.submittedAt)}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="cell">
                       <QuotationStatusBadge status={q.status} />
                     </td>
                   </tr>
@@ -92,6 +135,16 @@ export default function SupplierQuotationsPage() {
               </tbody>
             </table>
           </div>
+          <Pagination
+            page={data.meta.page}
+            pageSize={data.meta.pageSize}
+            total={data.meta.total}
+            onPageChange={setPage}
+            onPageSizeChange={(size) => {
+              setPageSize(size);
+              setPage(1);
+            }}
+          />
         </Card>
       )}
     </div>

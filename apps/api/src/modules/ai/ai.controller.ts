@@ -47,11 +47,8 @@ export class AiController {
   @Post('purchase-requests/:id/suggest-suppliers')
   @RequirePermissions(PERMISSIONS.AI_USE)
   @ApiOperation({ summary: 'Gợi ý nhà cung cấp phù hợp để mời báo giá' })
-  suggestSuppliers(
-    @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser('id') userId: string,
-  ) {
-    return this.service.suggestSuppliers(id, userId);
+  suggestSuppliers(@Param('id', ParseUUIDPipe) id: string) {
+    return this.service.suggestSuppliers(id);
   }
 
   @Post('rfqs/:id/analyze-quotations')
@@ -86,10 +83,16 @@ export class AiController {
       properties: { file: { type: 'string', format: 'binary' } },
     },
   })
-  @ApiOperation({ summary: 'Đọc báo giá PDF và trích xuất thành dữ liệu có cấu trúc' })
+  @ApiOperation({
+    summary: 'Đọc báo giá PDF và trích xuất thành dữ liệu có cấu trúc',
+  })
   extractQuotation(
     @UploadedFile()
-    file?: { buffer: Buffer; mimetype: string; size: number },
+    file?: {
+      buffer: Buffer;
+      mimetype: string;
+      size: number;
+    },
   ) {
     if (!file) throw new BadRequestException('Chưa chọn file PDF');
     return this.service.extractQuotation(file);

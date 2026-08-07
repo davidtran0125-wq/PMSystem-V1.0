@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { ApprovalTarget, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 
 export interface ResolvedStep {
@@ -32,6 +32,8 @@ export class ApprovalRoutingService {
     amount: Prisma.Decimal | number | null;
     categoryId?: string | null;
     departmentId?: string | null;
+    /** Yêu cầu mua hàng và đơn hàng có bộ quy trình riêng, không dùng lẫn. */
+    appliesTo?: ApprovalTarget;
   }): Promise<ResolvedWorkflow | null> {
     const amount = new Prisma.Decimal(input.amount ?? 0);
 
@@ -39,6 +41,7 @@ export class ApprovalRoutingService {
       where: {
         isActive: true,
         deletedAt: null,
+        appliesTo: input.appliesTo ?? ApprovalTarget.PURCHASE_REQUEST,
         AND: [
           { OR: [{ minAmount: null }, { minAmount: { lte: amount } }] },
           { OR: [{ maxAmount: null }, { maxAmount: { gt: amount } }] },

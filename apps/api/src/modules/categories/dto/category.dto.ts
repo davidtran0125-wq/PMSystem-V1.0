@@ -46,6 +46,15 @@ export class CreateCategoryDto {
   @IsOptional()
   @IsString()
   parentId?: string;
+
+  @ApiPropertyOptional({
+    default: true,
+    description:
+      'true = mua hàng hóa, mỗi dòng phải chọn mã vật tư. false = mua dịch vụ, nhập tự do.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  requiresMaterial?: boolean;
 }
 
 export class UpdateCategoryDto extends PartialType(CreateCategoryDto) {

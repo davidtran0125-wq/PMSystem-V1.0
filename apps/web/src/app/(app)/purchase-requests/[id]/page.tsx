@@ -25,16 +25,20 @@ import {
   AiPanel,
   ScoreBadge,
 } from '@/components/ai-panel';
+import { ConfirmButton } from '@/components/confirm-button';
+import { PriceHistoryButton, usePriceHistory } from '@/components/price-history';
+import { CommentBody, MentionInput } from '@/components/mention-input';
 import { api, apiErrorMessage } from '@/lib/api';
 import { cn, formatCurrency, formatDate, formatDateTime } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth';
 import type {
-  PurchaseRequestAnalysis,
-  SupplierSuggestionResult,
   ApprovalStep,
   ApprovalWorkflowRef,
   Comment,
+  MentionableUser,
   PurchaseRequest,
+  PurchaseRequestAnalysis,
+  SupplierSuggestionResult,
 } from '@/lib/types';
 
 type ReviewAction = 'approve' | 'reject' | 'request-clarification';
@@ -49,6 +53,7 @@ export default function PurchaseRequestDetailPage() {
 
   const [reviewComment, setReviewComment] = useState('');
   const [commentBody, setCommentBody] = useState('');
+  const [mentioned, setMentioned] = useState<MentionableUser[]>([]);
   const [internal, setInternal] = useState(false);
 
   const { data: pr, isLoading } = useQuery({
@@ -114,14 +119,20 @@ export default function PurchaseRequestDetailPage() {
     mutationFn: async () =>
       api.post(`/purchase-requests/${id}/comments`, {
         body: commentBody,
+        mentionUserIds: mentioned.map((u) => u.id),
         isInternal: internal,
       }),
     onSuccess: () => {
       setCommentBody('');
+      setMentioned([]);
       invalidate();
     },
     onError: (error) => toast.error(apiErrorMessage(error)),
   });
+
+  // Người duyệt cần thấy ngay lần trước mua bao nhiêu trước khi bấm Duyệt.
+  // Hook phải đứng trước mọi lần return sớm.
+  const priceHistory = usePriceHistory((pr?.items ?? []).map((i) => i.materialId));
 
   if (isLoading || !pr) {
     return (
@@ -133,6 +144,7 @@ export default function PurchaseRequestDetailPage() {
   }
 
   const isRequester = pr.requesterId === user?.id;
+
   const canEdit =
     isRequester && ['DRAFT', 'NEED_CLARIFICATION'].includes(pr.status);
   const isReviewable = ['SUBMITTED', 'BUYER_REVIEW'].includes(pr.status);
@@ -155,14 +167,16 @@ export default function PurchaseRequestDetailPage() {
         actions={
           <div className="flex flex-wrap gap-2">
             {canEdit ? (
-              <Button
+              <ConfirmButton
                 variant="outline"
-                onClick={() => submit.mutate()}
+                confirmLabel="Gửi yêu cầu đi duyệt?"
+                confirmActionLabel="Gửi"
+                onConfirm={() => submit.mutate()}
                 disabled={submit.isPending}
               >
                 <Send className="h-4 w-4" />
                 Gửi duyệt
-              </Button>
+              </ConfirmButton>
             ) : null}
             {canReview && pr.status === 'SUBMITTED' ? (
               <Button
@@ -264,40 +278,64 @@ export default function PurchaseRequestDetailPage() {
             </CardHeader>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="border-y border-border bg-muted/50 text-left">
+                <thead className="border-y border-border bg-muted/40 text-left">
                   <tr>
-                    <th className="px-4 py-2 font-medium">#</th>
-                    <th className="px-4 py-2 font-medium">Tên hàng</th>
-                    <th className="px-4 py-2 font-medium">Số lượng</th>
-                    <th className="px-4 py-2 font-medium">Đơn giá dự kiến</th>
-                    <th className="px-4 py-2 font-medium">Thành tiền</th>
+                    <th className="cell-head">#</th>
+                    <th className="cell-head">Tên hàng</th>
+                    <th className="cell-head">Số lượng</th>
+                    <th className="cell-head">Đơn giá dự kiến</th>
+                    <th className="cell-head">Thành tiền</th>
+                    <th className="cell-head">Lịch sử mua</th>
                   </tr>
                 </thead>
                 <tbody>
                   {pr.items.map((item) => (
                     <tr key={item.id} className="border-b border-border last:border-0">
-                      <td className="px-4 py-2">{item.lineNo}</td>
-                      <td className="px-4 py-2">
+                      <td className="cell">{item.lineNo}</td>
+                      <td className="cell">
                         <p>{item.name}</p>
+                        {item.material ? (
+                          <Link
+                            href={`/materials/${item.material.id}`}
+                            className="font-mono text-xs text-primary hover:underline"
+                          >
+                            {item.material.code}
+                          </Link>
+                        ) : null}
                         {item.specification ? (
                           <p className="text-xs text-muted-foreground">
                             {item.specification}
                           </p>
                         ) : null}
                       </td>
-                      <td className="px-4 py-2 tabular-nums">
+                      <td className="cell tabular-nums">
                         {Number(item.quantity).toLocaleString('vi-VN')} {item.unit}
                       </td>
-                      <td className="px-4 py-2 tabular-nums">
+                      <td className="cell tabular-nums">
                         {formatCurrency(item.estimatedPrice, pr.currency)}
                       </td>
-                      <td className="px-4 py-2 tabular-nums">
+                      <td className="cell tabular-nums">
                         {item.estimatedPrice
                           ? formatCurrency(
                               Number(item.estimatedPrice) * Number(item.quantity),
                               pr.currency,
                             )
                           : '—'}
+                      </td>
+                      <td className="min-w-52 cell">
+                        <PriceHistoryButton
+                          materialId={item.materialId}
+                          materialCode={item.material?.code}
+                          loading={priceHistory.isLoading}
+                          summary={
+                            item.materialId
+                              ? priceHistory.data?.[item.materialId]
+                              : undefined
+                          }
+                          currentPrice={
+                            item.estimatedPrice ? Number(item.estimatedPrice) : null
+                          }
+                        />
                       </td>
                     </tr>
                   ))}
@@ -319,26 +357,32 @@ export default function PurchaseRequestDetailPage() {
                   onChange={(e) => setReviewComment(e.target.value)}
                 />
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <Button
-                    onClick={() => review.mutate('approve')}
+                  <ConfirmButton
+                    confirmLabel="Duyệt yêu cầu này?"
+                    confirmActionLabel="Duyệt"
+                    onConfirm={() => review.mutate('approve')}
                     disabled={review.isPending}
                   >
                     Duyệt
-                  </Button>
-                  <Button
+                  </ConfirmButton>
+                  <ConfirmButton
                     variant="outline"
-                    onClick={() => review.mutate('request-clarification')}
+                    confirmLabel="Trả lại để bổ sung?"
+                    confirmActionLabel="Trả lại"
+                    onConfirm={() => review.mutate('request-clarification')}
                     disabled={review.isPending || !reviewComment.trim()}
                   >
                     Yêu cầu bổ sung
-                  </Button>
-                  <Button
+                  </ConfirmButton>
+                  <ConfirmButton
                     variant="destructive"
-                    onClick={() => review.mutate('reject')}
+                    confirmLabel="Từ chối yêu cầu này?"
+                    confirmActionLabel="Từ chối"
+                    onConfirm={() => review.mutate('reject')}
                     disabled={review.isPending || !reviewComment.trim()}
                   >
                     Từ chối
-                  </Button>
+                  </ConfirmButton>
                 </div>
               </CardContent>
             </Card>
@@ -453,17 +497,19 @@ export default function PurchaseRequestDetailPage() {
                           Nội bộ
                         </Badge>
                       ) : null}
-                      <p className="mt-1 whitespace-pre-wrap text-sm">{c.body}</p>
+                      <CommentBody body={c.body} mentions={c.mentions} />
                     </div>
                   ))
                 )}
               </div>
 
               <div className="mt-4">
-                <Textarea
-                  placeholder="Nhập bình luận…"
+                <MentionInput
+                  purchaseRequestId={pr.id}
                   value={commentBody}
-                  onChange={(e) => setCommentBody(e.target.value)}
+                  onChange={setCommentBody}
+                  mentioned={mentioned}
+                  onMentionedChange={setMentioned}
                 />
                 <div className="mt-2 flex items-center justify-between">
                   {canReview ? (

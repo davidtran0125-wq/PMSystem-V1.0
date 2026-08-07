@@ -27,6 +27,15 @@ Nguyên tắc:
 - Không bịa số liệu, tên nhà cung cấp, hay điều khoản không có trong dữ liệu.
 - Ưu tiên nêu vấn đề thực sự ảnh hưởng tới quyết định mua hàng, bỏ qua nhận xét hiển nhiên.`;
 
+/** Prisma trả về Decimal; nhúng thẳng vào chuỗi sẽ ra "[object Object]". */
+function num(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  return typeof value === 'object'
+    ? (value as { toString(): string }).toString()
+    : // eslint-disable-next-line @typescript-eslint/no-base-to-string
+      String(value);
+}
+
 @Injectable()
 export class AiAssistantService {
   constructor(
@@ -73,10 +82,13 @@ export class AiAssistantService {
       mức_ưu_tiên: pr.priority,
       lý_do_mua: pr.reason ?? '(không có)',
       mô_tả: pr.description ?? '(không có)',
-      ngày_cần_hàng: pr.neededByDate?.toISOString().slice(0, 10) ?? '(chưa nêu)',
-      ngân_sách: pr.budgetAmount ? `${pr.budgetAmount} ${pr.currency}` : '(chưa nêu)',
+      ngày_cần_hàng:
+        pr.neededByDate?.toISOString().slice(0, 10) ?? '(chưa nêu)',
+      ngân_sách: pr.budgetAmount
+        ? `${num(pr.budgetAmount)} ${pr.currency}`
+        : '(chưa nêu)',
       giá_trị_dự_kiến: pr.estimatedTotal
-        ? `${pr.estimatedTotal} ${pr.currency}`
+        ? `${num(pr.estimatedTotal)} ${pr.currency}`
         : '(chưa tính được)',
       thông_tin_theo_lĩnh_vực: Object.fromEntries(
         pr.dynamicValues.map((v) => [v.field.label, v.value ?? '(bỏ trống)']),
@@ -84,7 +96,7 @@ export class AiAssistantService {
       dòng_hàng: pr.items.map((i) => ({
         tên: i.name,
         quy_cách: i.specification ?? '(không có)',
-        số_lượng: `${i.quantity} ${i.unit}`,
+        số_lượng: `${num(i.quantity)} ${i.unit}`,
         đơn_giá_dự_kiến: i.estimatedPrice?.toString() ?? '(chưa có)',
       })),
     };
@@ -112,7 +124,7 @@ Nhiệm vụ: rà soát một yêu cầu mua hàng trước khi bộ phận mua 
 
   // ---------------------------------------------------------- supplier suggestion
 
-  async suggestSuppliers(purchaseRequestId: string, userId: string) {
+  async suggestSuppliers(purchaseRequestId: string) {
     const pr = await this.prisma.purchaseRequest.findFirst({
       where: { id: purchaseRequestId, deletedAt: null },
       include: { category: true, items: { orderBy: { lineNo: 'asc' } } },
@@ -128,7 +140,10 @@ Nhiệm vụ: rà soát một yêu cầu mua hàng trước khi bộ phận mua 
           where: { status: QuotationStatus.AWARDED, deletedAt: null },
           select: { id: true, totalAmount: true },
         },
-        contracts: { where: { deletedAt: null }, select: { id: true, status: true } },
+        contracts: {
+          where: { deletedAt: null },
+          select: { id: true, status: true },
+        },
         certificates: {
           where: { deletedAt: null },
           select: { name: true, status: true },
@@ -147,7 +162,9 @@ Nhiệm vụ: rà soát một yêu cầu mua hàng trước khi bộ phận mua 
         tiêu_đề: pr.title,
         lĩnh_vực: pr.category.nameEn ?? pr.category.name,
         giá_trị_dự_kiến: pr.estimatedTotal?.toString() ?? '(chưa có)',
-        dòng_hàng: pr.items.map((i) => `${i.name} — ${i.quantity} ${i.unit}`),
+        dòng_hàng: pr.items.map(
+          (i) => `${i.name} — ${num(i.quantity)} ${i.unit}`,
+        ),
       },
       nhà_cung_cấp: suppliers.map((s) => ({
         id: s.id,
@@ -202,12 +219,28 @@ Nhiệm vụ: chọn ra những nhà cung cấp phù hợp nhất để mời b�
             items: { orderBy: { lineNo: 'asc' } },
           },
         },
+        // Cần để biết vòng chào giá đã khép lại chưa.
+        suppliers: { select: { status: true } },
       },
     });
     if (!rfq) throw new NotFoundException('Không tìm thấy RFQ');
     if (rfq.quotations.length < 2) {
+      throw new BadRequestException('Cần ít nhất 2 báo giá đã gửi để so sánh');
+    }
+
+    // Phân tích của AI đọc thẳng vào giá, nên cũng phải chờ mở niêm phong —
+    // nếu không thì đây thành đường vòng để xem giá sớm.
+    const pending = rfq.suppliers.filter(
+      (s) => s.status !== 'QUOTED' && s.status !== 'DECLINED',
+    ).length;
+    const unsealed =
+      rfq.status === 'CLOSED' ||
+      rfq.status === 'AWARDED' ||
+      (rfq.dueDate !== null && rfq.dueDate.getTime() <= Date.now()) ||
+      (rfq.suppliers.length > 0 && pending === 0);
+    if (!unsealed) {
       throw new BadRequestException(
-        'Cần ít nhất 2 báo giá đã gửi để so sánh',
+        `Giá còn niêm phong nên chưa phân tích được. Còn ${pending} nhà cung cấp chưa trả lời.`,
       );
     }
 
@@ -215,17 +248,18 @@ Nhiệm vụ: chọn ra những nhà cung cấp phù hợp nhất để mời b�
       yêu_cầu: {
         tiêu_đề: rfq.purchaseRequest.title,
         lĩnh_vực:
-          rfq.purchaseRequest.category.nameEn ?? rfq.purchaseRequest.category.name,
+          rfq.purchaseRequest.category.nameEn ??
+          rfq.purchaseRequest.category.name,
         ngân_sách: rfq.purchaseRequest.budgetAmount?.toString() ?? '(chưa nêu)',
         dòng_hàng_yêu_cầu: rfq.purchaseRequest.items.map(
-          (i) => `${i.name} — ${i.quantity} ${i.unit}`,
+          (i) => `${i.name} — ${num(i.quantity)} ${i.unit}`,
         ),
       },
       báo_giá: rfq.quotations.map((q) => ({
         id: q.id,
         nhà_cung_cấp: q.supplier.companyName,
         điểm_đánh_giá: q.supplier.ratingAvg?.toString() ?? '(chưa đánh giá)',
-        tổng_tiền: `${q.totalAmount} ${q.currency}`,
+        tổng_tiền: `${num(q.totalAmount)} ${q.currency}`,
         thời_gian_giao_ngày: q.leadTimeDays ?? '(chưa nêu)',
         điều_khoản_thanh_toán: q.paymentTerm ?? '(chưa nêu)',
         incoterm: q.incoterm ?? '(chưa nêu)',
@@ -234,7 +268,7 @@ Nhiệm vụ: chọn ra những nhà cung cấp phù hợp nhất để mời b�
         ghi_chú: q.remark ?? '(không có)',
         dòng_hàng: q.items.map((i) => ({
           tên: i.name,
-          số_lượng: `${i.quantity} ${i.unit}`,
+          số_lượng: `${num(i.quantity)} ${i.unit}`,
           đơn_giá: i.unitPrice.toString(),
         })),
       })),
@@ -284,11 +318,14 @@ Nhiệm vụ: so sánh các báo giá và khuyến nghị lựa chọn. Giá th�
       số_hợp_đồng: contract.contractNumber,
       tên: contract.title,
       nhà_cung_cấp: contract.supplier.companyName,
-      lĩnh_vực: contract.category?.nameEn ?? contract.category?.name ?? '(chưa phân loại)',
+      lĩnh_vực:
+        contract.category?.nameEn ??
+        contract.category?.name ??
+        '(chưa phân loại)',
       bộ_phận: contract.department?.name ?? '(chưa gán)',
       ngày_bắt_đầu: contract.startDate.toISOString().slice(0, 10),
       ngày_kết_thúc: contract.endDate.toISOString().slice(0, 10),
-      giá_trị: `${contract.contractValue} ${contract.currency}`,
+      giá_trị: `${num(contract.contractValue)} ${contract.currency}`,
       có_điều_khoản_gia_hạn: contract.renewalOption,
       trạng_thái: contract.status,
       điều_khoản_thanh_toán_ncc: contract.supplier.paymentTerm ?? '(chưa có)',
@@ -309,7 +346,10 @@ Lưu ý quan trọng: dữ liệu đầu vào chỉ là thông tin quản lý h�
       action: 'AI_REVIEW',
       module: 'contract',
       entityId: id,
-      newValue: { riskLevel: result.riskLevel, findings: result.findings.length },
+      newValue: {
+        riskLevel: result.riskLevel,
+        findings: result.findings.length,
+      },
     });
 
     return result;
@@ -338,7 +378,10 @@ Quy tắc:
       prompt:
         'Đọc file báo giá đính kèm và trích xuất thông tin theo cấu trúc yêu cầu.',
       documents: [
-        { base64: file.buffer.toString('base64'), mediaType: 'application/pdf' },
+        {
+          base64: file.buffer.toString('base64'),
+          mediaType: 'application/pdf',
+        },
       ],
     });
   }

@@ -26,6 +26,11 @@ async function bootstrap() {
     }),
   );
 
+  // Swagger phơi bày toàn bộ hình dạng API; chỉ bật ngoài môi trường production.
+  const swaggerEnabled =
+    config.get<string>('NODE_ENV', 'development') !== 'production' ||
+    config.get<string>('SWAGGER_ENABLED') === 'true';
+
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Procurement Management System API')
     .setDescription(
@@ -34,16 +39,27 @@ async function bootstrap() {
     .setVersion('1.0')
     .addBearerAuth()
     .build();
-  SwaggerModule.setup(
-    'docs',
-    app,
-    SwaggerModule.createDocument(app, swaggerConfig),
-  );
+  if (swaggerEnabled) {
+    SwaggerModule.setup(
+      'docs',
+      app,
+      SwaggerModule.createDocument(app, swaggerConfig),
+    );
+  }
 
-  const port = config.get<number>('API_PORT', 4000);
+  // Cho phép Nest chạy hook onModuleDestroy khi nhận SIGTERM, tránh cắt ngang
+  // request đang xử lý lúc deploy.
+  app.enableShutdownHooks();
+
+  // Railway, Render, Fly và phần lớn nền tảng container tự cấp cổng qua biến
+  // PORT và không cho chọn. Ưu tiên nó, rồi mới tới cấu hình của dự án.
+  const port =
+    config.get<number>('PORT') ?? config.get<number>('API_PORT', 4000);
   await app.listen(port);
   console.log(`API listening on http://localhost:${port}`);
-  console.log(`Swagger docs on http://localhost:${port}/docs`);
+  if (swaggerEnabled) {
+    console.log(`Swagger docs on http://localhost:${port}/docs`);
+  }
 }
 
 void bootstrap();

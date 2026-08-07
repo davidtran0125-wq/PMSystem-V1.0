@@ -159,11 +159,41 @@ export default function SupplierRfqDetailPage() {
         description={`Hạn nộp báo giá: ${formatDate(rfq.dueDate)}`}
       />
 
-      <div className="mb-4 flex flex-wrap gap-2">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <RfqStatusBadge status={rfq.status} />
         {expired ? <Badge tone="danger">Đã hết hạn</Badge> : null}
         {myQuote ? <QuotationStatusBadge status={myQuote.status} /> : null}
+        {typeof rfq.competitorCount === 'number' && rfq.competitorCount > 0 ? (
+          <span className="text-xs text-muted-foreground">
+            Cùng {rfq.competitorCount} nhà cung cấp khác được mời
+          </span>
+        ) : null}
       </div>
+
+      {rfq.myResult ? (
+        <Card
+          className={
+            rfq.myResult === 'WON'
+              ? 'mb-4 border-emerald-300 dark:border-emerald-900'
+              : 'mb-4'
+          }
+        >
+          <CardContent className="p-4">
+            <p className="font-medium">
+              {rfq.myResult === 'WON'
+                ? 'Báo giá của bạn đã trúng thầu'
+                : rfq.myResult === 'LOST'
+                  ? 'Báo giá của bạn chưa được chọn lần này'
+                  : 'Yêu cầu này đã chốt nhà cung cấp'}
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {rfq.myResult === 'WON'
+                ? 'Bên mua sẽ phát hành đơn hàng, bạn sẽ nhận được thông báo.'
+                : 'Cảm ơn bạn đã tham gia báo giá. Giá và thông tin của nhà cung cấp khác không được công bố.'}
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {rfq.instructions ? (
         <Card className="mb-4">
@@ -196,12 +226,12 @@ export default function SupplierRfqDetailPage() {
             </div>
 
             <table className="mt-4 w-full text-sm">
-              <thead className="border-y border-border text-left">
+              <thead className="border-y border-border bg-muted/40 text-left">
                 <tr>
-                  <th className="py-2 font-medium">Hàng hóa</th>
-                  <th className="py-2 font-medium">Số lượng</th>
-                  <th className="py-2 font-medium">Đơn giá</th>
-                  <th className="py-2 font-medium">Thành tiền</th>
+                  <th className="cell-head">Hàng hóa</th>
+                  <th className="cell-head">Số lượng</th>
+                  <th className="cell-head">Đơn giá</th>
+                  <th className="cell-head">Thành tiền</th>
                 </tr>
               </thead>
               <tbody>

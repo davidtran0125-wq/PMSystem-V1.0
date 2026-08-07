@@ -81,4 +81,22 @@ export class CategoriesController {
   ) {
     return this.categoriesService.upsertForm(id, dto, userId);
   }
+
+  @Get(':id/forms')
+  @RequirePermissions(PERMISSIONS.CATEGORY_READ)
+  @ApiOperation({ summary: 'All form versions of this category' })
+  formVersions(@Param('id', ParseUUIDPipe) id: string) {
+    return this.categoriesService.formVersions(id);
+  }
+
+  @Delete(':id/forms/:formId')
+  @RequirePermissions(PERMISSIONS.CATEGORY_WRITE)
+  @ApiOperation({ summary: 'Delete a form version that is no longer needed' })
+  removeForm(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('formId', ParseUUIDPipe) formId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.categoriesService.removeForm(id, formId, userId);
+  }
 }

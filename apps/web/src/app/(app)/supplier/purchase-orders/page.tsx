@@ -1,30 +1,62 @@
 'use client';
 
 import Link from 'next/link';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Card,
   EmptyState,
   PageHeader,
+  Pagination,
   Skeleton,
+  StatusFilterBar,
 } from '@/components/ui';
 import { PoStatusBadge } from '@/components/status-badge';
 import { api } from '@/lib/api';
 import { formatCurrency, formatDate } from '@/lib/utils';
-import type { Paginated, PurchaseOrder } from '@/lib/types';
+import type {
+  Paginated,
+  PurchaseOrder,
+  PurchaseOrderStatus,
+} from '@/lib/types';
+
+/** Nhà cung cấp không nhìn thấy đơn nháp của bên mua nên không liệt kê DRAFT. */
+const STATUSES: { value: PurchaseOrderStatus | ''; label: string }[] = [
+  { value: '', label: 'Tất cả' },
+  { value: 'ISSUED', label: 'Chờ tôi xác nhận' },
+  { value: 'ACKNOWLEDGED', label: 'Đã xác nhận' },
+  { value: 'PARTIALLY_RECEIVED', label: 'Giao một phần' },
+  { value: 'COMPLETED', label: 'Hoàn tất' },
+  { value: 'CANCELLED', label: 'Đã hủy' },
+];
 
 export default function SupplierPurchaseOrdersPage() {
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [status, setStatus] = useState('');
+
+  /** Đếm trên toàn bộ đơn của mình, không riêng trang đang xem. */
+  const counts = useQuery({
+    queryKey: ['supplier-purchase-order-counts'],
+    queryFn: async () =>
+      (
+        await api.get<{ total: number; counts: Record<PurchaseOrderStatus, number> }>(
+          '/purchase-orders/status-counts',
+        )
+      ).data,
+  });
+
   const { data, isLoading } = useQuery({
-    queryKey: ['supplier-purchase-orders'],
+    queryKey: ['supplier-purchase-orders', { page, pageSize, status }],
     queryFn: async () =>
       (
         await api.get<Paginated<PurchaseOrder>>('/purchase-orders', {
-          params: { pageSize: 50 },
+          params: { page, pageSize, ...(status ? { status } : {}) },
         })
       ).data,
   });
 
-  const pending = data?.data.filter((po) => po.status === 'ISSUED').length ?? 0;
+  const pending = counts.data?.counts.ISSUED ?? 0;
 
   return (
     <div>
@@ -42,6 +74,18 @@ export default function SupplierPurchaseOrdersPage() {
         </Card>
       ) : null}
 
+      <StatusFilterBar
+        options={STATUSES}
+        value={status}
+        onChange={(v) => {
+          setStatus(v);
+          setPage(1);
+        }}
+        counts={counts.data?.counts}
+        total={counts.data?.total}
+        isLoading={counts.isLoading}
+      />
+
       {isLoading ? (
         <div className="space-y-3">
           {Array.from({ length: 3 }).map((_, i) => (
@@ -57,13 +101,13 @@ export default function SupplierPurchaseOrdersPage() {
         <Card className="overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="border-b border-border bg-muted/50 text-left">
+              <thead className="border-y border-border bg-muted/40 text-left">
                 <tr>
-                  <th className="px-4 py-3 font-medium">Mã đơn</th>
-                  <th className="px-4 py-3 font-medium">Tiêu đề</th>
-                  <th className="px-4 py-3 font-medium">Tổng tiền</th>
-                  <th className="px-4 py-3 font-medium">Ngày giao</th>
-                  <th className="px-4 py-3 font-medium">Trạng thái</th>
+                  <th className="cell-head">Mã đơn</th>
+                  <th className="cell-head">Tiêu đề</th>
+                  <th className="cell-head">Tổng tiền</th>
+                  <th className="cell-head">Ngày giao</th>
+                  <th className="cell-head">Trạng thái</th>
                 </tr>
               </thead>
               <tbody>
@@ -72,7 +116,7 @@ export default function SupplierPurchaseOrdersPage() {
                     key={po.id}
                     className="border-b border-border last:border-0 hover:bg-accent/50"
                   >
-                    <td className="px-4 py-3">
+                    <td className="cell">
                       <Link
                         href={`/supplier/purchase-orders/${po.id}`}
                         className="font-medium text-primary hover:underline"
@@ -80,14 +124,14 @@ export default function SupplierPurchaseOrdersPage() {
                         {po.code}
                       </Link>
                     </td>
-                    <td className="max-w-64 truncate px-4 py-3">{po.title}</td>
-                    <td className="px-4 py-3 font-medium tabular-nums">
+                    <td className="max-w-64 truncate cell">{po.title}</td>
+                    <td className="cell font-medium tabular-nums">
                       {formatCurrency(po.totalAmount, po.currency)}
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground">
+                    <td className="cell text-muted-foreground">
                       {formatDate(po.deliveryDate)}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="cell">
                       <PoStatusBadge status={po.status} />
                     </td>
                   </tr>
@@ -95,6 +139,16 @@ export default function SupplierPurchaseOrdersPage() {
               </tbody>
             </table>
           </div>
+          <Pagination
+            page={data.meta.page}
+            pageSize={data.meta.pageSize}
+            total={data.meta.total}
+            onPageChange={setPage}
+            onPageSizeChange={(size) => {
+              setPageSize(size);
+              setPage(1);
+            }}
+          />
         </Card>
       )}
     </div>

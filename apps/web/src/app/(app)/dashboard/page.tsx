@@ -8,11 +8,13 @@ import {
   Clock,
   FileText,
   MessageCircleQuestion,
+  PiggyBank,
   Timer,
 } from 'lucide-react';
 import {
   Card,
   CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
   PageHeader,
@@ -27,6 +29,27 @@ interface SpendResponse {
   byDepartment: { id: string; name: string; total: number; count: number }[];
   totalSpend: number;
   awardedCount: number;
+}
+
+interface RequestToOrderSavings {
+  summary: {
+    requests: number;
+    estimated: number;
+    actual: number;
+    saved: number;
+    savedPercent: number;
+  };
+  byMonth: { month: string; estimated: number; actual: number; saved: number }[];
+  topSaved: {
+    purchaseRequestId: string;
+    code: string;
+    title: string;
+    estimated: number;
+    actual: number;
+    saved: number;
+    savedPercent: number;
+  }[];
+  topOverrun: RequestToOrderSavings['topSaved'];
 }
 
 interface SavingsResponse {
@@ -63,6 +86,14 @@ export default function DashboardPage() {
     queryKey: ['dashboard', 'savings'],
     queryFn: async () => (await api.get<SavingsResponse>('/dashboard/savings')).data,
   });
+  /** Chênh lệch giữa dự toán trên yêu cầu và giá chốt trên đơn hàng. */
+  const prToPo = useQuery({
+    queryKey: ['dashboard', 'request-to-order-savings'],
+    queryFn: async () =>
+      (await api.get<RequestToOrderSavings>('/dashboard/request-to-order-savings'))
+        .data,
+  });
+
   const topSuppliers = useQuery({
     queryKey: ['dashboard', 'top-suppliers'],
     queryFn: async () => (await api.get<TopSupplier[]>('/dashboard/top-suppliers')).data,
@@ -114,6 +145,70 @@ export default function DashboardPage() {
           );
         })}
       </div>
+
+      <Card className="mt-6 overflow-hidden">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2">
+            <PiggyBank className="h-4 w-4" />
+            Chênh lệch dự toán và giá chốt
+          </CardTitle>
+          <CardDescription>
+            So giá trị dự kiến ghi trên yêu cầu mua với giá thật đã chốt trên đơn hàng.
+            Một yêu cầu chia thầu cho nhiều nhà cung cấp được cộng dồn lại rồi mới so.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {prToPo.isLoading ? (
+            <Skeleton className="h-24 w-full" />
+          ) : !prToPo.data?.summary.requests ? (
+            <p className="text-sm text-muted-foreground">
+              Chưa có yêu cầu nào đã lên đơn hàng để so sánh.
+            </p>
+          ) : (
+            <>
+              <div className="grid gap-3 sm:grid-cols-4">
+                <Figure
+                  label="Dự toán trên yêu cầu"
+                  value={formatCurrency(prToPo.data.summary.estimated)}
+                />
+                <Figure
+                  label="Giá chốt trên đơn hàng"
+                  value={formatCurrency(prToPo.data.summary.actual)}
+                />
+                <Figure
+                  label={prToPo.data.summary.saved >= 0 ? 'Tiết kiệm' : 'Vượt dự toán'}
+                  value={formatCurrency(Math.abs(prToPo.data.summary.saved))}
+                  tone={prToPo.data.summary.saved >= 0 ? 'good' : 'warn'}
+                />
+                <Figure
+                  label="Tỷ lệ"
+                  value={`${prToPo.data.summary.savedPercent >= 0 ? '' : '+'}${Math.abs(
+                    prToPo.data.summary.savedPercent,
+                  ).toFixed(1)}%`}
+                  tone={prToPo.data.summary.savedPercent >= 0 ? 'good' : 'warn'}
+                />
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Trên {prToPo.data.summary.requests} yêu cầu đã lên đơn trong 12 tháng.
+              </p>
+
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <SavingList
+                  title="Tiết kiệm nhiều nhất"
+                  rows={prToPo.data.topSaved.filter((r) => r.saved > 0)}
+                  tone="good"
+                />
+                <SavingList
+                  title="Vượt dự toán nhiều nhất"
+                  rows={prToPo.data.topOverrun}
+                  tone="warn"
+                  emptyHint="Không có yêu cầu nào vượt dự toán."
+                />
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
         <Card>
@@ -259,6 +354,82 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+    </div>
+  );
+}
+
+function Figure({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone?: 'good' | 'warn';
+}) {
+  return (
+    <div className="rounded-lg border border-border p-3">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p
+        className={
+          tone === 'good'
+            ? 'mt-0.5 text-lg font-semibold tabular-nums text-emerald-600 dark:text-emerald-400'
+            : tone === 'warn'
+              ? 'mt-0.5 text-lg font-semibold tabular-nums text-amber-600 dark:text-amber-400'
+              : 'mt-0.5 text-lg font-semibold tabular-nums'
+        }
+      >
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function SavingList({
+  title,
+  rows,
+  tone,
+  emptyHint = 'Chưa có dữ liệu.',
+}: {
+  title: string;
+  rows: RequestToOrderSavings['topSaved'];
+  tone: 'good' | 'warn';
+  emptyHint?: string;
+}) {
+  return (
+    <div>
+      <p className="mb-1.5 text-xs font-medium text-muted-foreground">{title}</p>
+      {!rows.length ? (
+        <p className="text-xs text-muted-foreground">{emptyHint}</p>
+      ) : (
+        <ul className="divide-y divide-border rounded-lg border border-border">
+          {rows.map((r) => (
+            <li key={r.purchaseRequestId} className="px-3 py-2 text-sm">
+              <Link
+                href={`/purchase-requests/${r.purchaseRequestId}`}
+                className="flex items-center justify-between gap-2 hover:underline"
+              >
+                <span className="min-w-0">
+                  <span className="font-medium">{r.code}</span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {r.title}
+                  </span>
+                </span>
+                <span
+                  className={
+                    tone === 'good'
+                      ? 'shrink-0 tabular-nums font-medium text-emerald-600 dark:text-emerald-400'
+                      : 'shrink-0 tabular-nums font-medium text-amber-600 dark:text-amber-400'
+                  }
+                >
+                  {r.savedPercent >= 0 ? '' : '+'}
+                  {Math.abs(r.savedPercent).toFixed(1)}%
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

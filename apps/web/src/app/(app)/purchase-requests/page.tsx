@@ -11,8 +11,9 @@ import {
   EmptyState,
   Input,
   PageHeader,
-  Select,
+  Pagination,
   Skeleton,
+  StatusFilterBar,
 } from '@/components/ui';
 import { PriorityBadge, PrStatusBadge } from '@/components/status-badge';
 import { api } from '@/lib/api';
@@ -28,6 +29,7 @@ const STATUSES: { value: PurchaseRequestStatus | ''; label: string }[] = [
   { value: 'NEED_CLARIFICATION', label: 'Cần bổ sung' },
   { value: 'APPROVED', label: 'Đã duyệt' },
   { value: 'REJECTED', label: 'Từ chối' },
+  { value: 'CANCELLED', label: 'Đã hủy' },
 ];
 
 function PurchaseRequestList() {
@@ -40,16 +42,34 @@ function PurchaseRequestList() {
   const [status, setStatus] = useState<string>(params.get('status') ?? '');
   const [mine, setMine] = useState(false);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  /** Đếm theo trạng thái, không phụ thuộc trạng thái đang chọn. */
+  const counts = useQuery({
+    queryKey: ['purchase-request-counts', { search, mine }],
+    queryFn: async () =>
+      (
+        await api.get<{ total: number; counts: Record<PurchaseRequestStatus, number> }>(
+          '/purchase-requests/status-counts',
+          {
+            params: {
+              ...(search ? { search } : {}),
+              ...(mine ? { mine: true } : {}),
+            },
+          },
+        )
+      ).data,
+  });
 
   const { data, isLoading } = useQuery({
-    queryKey: ['purchase-requests', { search, status, mine, page }],
+    queryKey: ['purchase-requests', { search, status, mine, page, pageSize }],
     queryFn: async () => {
       const { data } = await api.get<Paginated<PurchaseRequest>>(
         '/purchase-requests',
         {
           params: {
             page,
-            pageSize: 20,
+            pageSize,
             ...(search ? { search } : {}),
             ...(status ? { status } : {}),
             ...(mine ? { mine: true } : {}),
@@ -92,20 +112,6 @@ function PurchaseRequestList() {
             }}
           />
         </div>
-        <Select
-          className="w-52"
-          value={status}
-          onChange={(e) => {
-            setStatus(e.target.value);
-            setPage(1);
-          }}
-        >
-          {STATUSES.map((s) => (
-            <option key={s.value} value={s.value}>
-              {s.label}
-            </option>
-          ))}
-        </Select>
         {canReview ? (
           <label className="flex items-center gap-2 text-sm">
             <input
@@ -121,6 +127,18 @@ function PurchaseRequestList() {
           </label>
         ) : null}
       </div>
+
+      <StatusFilterBar
+        options={STATUSES}
+        value={status}
+        onChange={(v) => {
+          setStatus(v);
+          setPage(1);
+        }}
+        counts={counts.data?.counts}
+        total={counts.data?.total}
+        isLoading={counts.isLoading}
+      />
 
       {isLoading ? (
         <div className="space-y-3">
@@ -146,16 +164,16 @@ function PurchaseRequestList() {
           <Card className="overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="border-b border-border bg-muted/50 text-left">
+                <thead className="border-y border-border bg-muted/40 text-left">
                   <tr>
-                    <th className="px-4 py-3 font-medium">Mã</th>
-                    <th className="px-4 py-3 font-medium">Tiêu đề</th>
-                    <th className="px-4 py-3 font-medium">Lĩnh vực</th>
-                    <th className="px-4 py-3 font-medium">Người yêu cầu</th>
-                    <th className="px-4 py-3 font-medium">Ưu tiên</th>
-                    <th className="px-4 py-3 font-medium">Giá trị dự kiến</th>
-                    <th className="px-4 py-3 font-medium">Trạng thái</th>
-                    <th className="px-4 py-3 font-medium">Ngày tạo</th>
+                    <th className="cell-head">Mã</th>
+                    <th className="cell-head">Tiêu đề</th>
+                    <th className="cell-head">Lĩnh vực</th>
+                    <th className="cell-head">Người yêu cầu</th>
+                    <th className="cell-head">Ưu tiên</th>
+                    <th className="cell-head">Giá trị dự kiến</th>
+                    <th className="cell-head">Trạng thái</th>
+                    <th className="cell-head">Ngày tạo</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -164,7 +182,7 @@ function PurchaseRequestList() {
                       key={pr.id}
                       className="border-b border-border last:border-0 hover:bg-accent/50"
                     >
-                      <td className="px-4 py-3">
+                      <td className="cell">
                         <Link
                           href={`/purchase-requests/${pr.id}`}
                           className="font-medium text-primary hover:underline"
@@ -172,23 +190,23 @@ function PurchaseRequestList() {
                           {pr.code}
                         </Link>
                       </td>
-                      <td className="max-w-64 truncate px-4 py-3">{pr.title}</td>
-                      <td className="px-4 py-3 text-muted-foreground">
+                      <td className="max-w-64 truncate cell">{pr.title}</td>
+                      <td className="cell text-muted-foreground">
                         {pr.category.nameEn ?? pr.category.name}
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground">
+                      <td className="cell text-muted-foreground">
                         {pr.requester.fullName}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="cell">
                         <PriorityBadge priority={pr.priority} />
                       </td>
-                      <td className="px-4 py-3 tabular-nums">
+                      <td className="cell tabular-nums">
                         {formatCurrency(pr.estimatedTotal, pr.currency)}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="cell">
                         <PrStatusBadge status={pr.status} />
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground">
+                      <td className="cell text-muted-foreground">
                         {formatDate(pr.createdAt)}
                       </td>
                     </tr>
@@ -196,33 +214,17 @@ function PurchaseRequestList() {
                 </tbody>
               </table>
             </div>
+            <Pagination
+              page={data.meta.page}
+              pageSize={data.meta.pageSize}
+              total={data.meta.total}
+              onPageChange={setPage}
+              onPageSizeChange={(size) => {
+                setPageSize(size);
+                setPage(1);
+              }}
+            />
           </Card>
-
-          {data.meta.totalPages > 1 ? (
-            <div className="mt-4 flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">
-                Trang {data.meta.page} / {data.meta.totalPages} — {data.meta.total} yêu cầu
-              </span>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={page <= 1}
-                  onClick={() => setPage((p) => p - 1)}
-                >
-                  Trước
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={page >= data.meta.totalPages}
-                  onClick={() => setPage((p) => p + 1)}
-                >
-                  Sau
-                </Button>
-              </div>
-            </div>
-          ) : null}
         </>
       )}
     </div>

@@ -26,6 +26,18 @@ export class DashboardController {
     return this.service.spendByCategory(months ?? 12);
   }
 
+  @Get('request-to-order-savings')
+  @RequirePermissions(PERMISSIONS.DASHBOARD_READ)
+  @ApiOperation({
+    summary:
+      'Chênh lệch giữa giá trị dự kiến trên yêu cầu mua và giá trị chốt trên đơn hàng',
+  })
+  requestToOrderSavings(
+    @Query('months', new ParseIntPipe({ optional: true })) months?: number,
+  ) {
+    return this.service.requestToOrderSavings(months ?? 12);
+  }
+
   @Get('savings')
   @RequirePermissions(PERMISSIONS.DASHBOARD_READ)
   savings(

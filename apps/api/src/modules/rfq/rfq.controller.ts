@@ -34,6 +34,20 @@ export class RfqController {
     return this.service.findAll(dto, user);
   }
 
+  @Get('status-counts')
+  @RequirePermissions(PERMISSIONS.RFQ_READ)
+  @ApiOperation({ summary: 'Số lượng RFQ theo từng trạng thái' })
+  statusCounts(@Query() dto: QueryRfqDto, @CurrentUser() user: AuthUser) {
+    return this.service.statusCounts(dto, user);
+  }
+
+  @Get('my-quotations/status-counts')
+  @RequirePermissions(PERMISSIONS.QUOTATION_READ)
+  @ApiOperation({ summary: 'Số báo giá của tôi theo từng trạng thái' })
+  myQuotationStatusCounts(@CurrentUser() user: AuthUser) {
+    return this.service.myQuotationStatusCounts(user);
+  }
+
   @Get('my-quotations')
   @RequirePermissions(PERMISSIONS.QUOTATION_READ)
   @ApiOperation({ summary: 'Quotation history of the signed-in supplier' })

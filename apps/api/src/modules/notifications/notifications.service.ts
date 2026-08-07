@@ -100,19 +100,23 @@ export class NotificationsService {
       this.logger.log(
         `[email:${input.event}] to=${recipient.email} subject="${input.title}"`,
       );
-      await this.prisma.notification.create({
-        data: {
-          userId: recipient.id,
-          event: input.event,
-          channel: NotificationChannel.EMAIL,
-          title: input.title,
-          body: input.body,
-          link: input.link,
-          entityType: input.entityType,
-          entityId: input.entityId,
-          sentAt: new Date(),
-        },
-      });
     }
+
+    // Một RFQ có thể gửi cho hàng chục nhà cung cấp; ghi từng bản một là từng
+    // ấy lượt đi lại với database.
+    const sentAt = new Date();
+    await this.prisma.notification.createMany({
+      data: recipients.map((recipient) => ({
+        userId: recipient.id,
+        event: input.event,
+        channel: NotificationChannel.EMAIL,
+        title: input.title,
+        body: input.body,
+        link: input.link,
+        entityType: input.entityType,
+        entityId: input.entityId,
+        sentAt,
+      })),
+    });
   }
 }

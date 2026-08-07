@@ -27,6 +27,7 @@ import type {
   Category,
   Department,
   DynamicForm,
+  Material,
   Paginated,
   PurchaseRequest,
 } from '@/lib/types';
@@ -41,6 +42,7 @@ interface FormValues {
   neededByDate: string;
   budgetAmount: string;
   items: {
+    materialId: string;
     name: string;
     specification: string;
     quantity: string;
@@ -51,6 +53,7 @@ interface FormValues {
 }
 
 const emptyItem = {
+  materialId: '',
   name: '',
   specification: '',
   quantity: '',
@@ -66,6 +69,7 @@ export default function NewPurchaseRequestPage() {
     control,
     handleSubmit,
     watch,
+    setValue,
     resetField,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
@@ -87,8 +91,22 @@ export default function NewPurchaseRequestPage() {
   const categoryId = watch('categoryId');
   const items = watch('items');
 
+  const materials = useQuery({
+    queryKey: ['materials', 'active'],
+    // Danh mục tham chiếu gần như không đổi trong một phiên làm việc.
+    staleTime: 10 * 60_000,
+    queryFn: async () =>
+      (
+        await api.get<Paginated<Material>>('/materials', {
+          params: { pageSize: 100, activeOnly: true },
+        })
+      ).data,
+  });
+
   const categories = useQuery({
     queryKey: ['categories', 'active'],
+    // Danh mục tham chiếu gần như không đổi trong một phiên làm việc.
+    staleTime: 10 * 60_000,
     queryFn: async () =>
       (
         await api.get<Paginated<Category>>('/categories', {
@@ -96,6 +114,16 @@ export default function NewPurchaseRequestPage() {
         })
       ).data,
   });
+
+  /**
+   * Nhóm hàng hóa bắt buộc chọn mã vật tư; nhóm dịch vụ nhập tự do vì không có
+   * mã để theo dõi tồn kho và lịch sử giá.
+   */
+  const selectedCategory = categories.data?.data.find((c) => c.id === categoryId);
+  // Mặc định hiện ô chọn mã ngay khi mở form; chỉ ẩn khi đã chọn đúng một
+  // lĩnh vực dịch vụ. Nếu để mặc định ẩn thì người dùng mở form ra sẽ tưởng
+  // hệ thống không có chỗ nhập mã vật tư.
+  const requiresMaterial = selectedCategory ? selectedCategory.requiresMaterial !== false : true;
 
   const departments = useQuery({
     queryKey: ['departments'],
@@ -115,6 +143,14 @@ export default function NewPurchaseRequestPage() {
   useEffect(() => {
     resetField('dynamicValues', { defaultValue: {} });
   }, [categoryId, resetField]);
+
+  // Chuyển sang nhóm dịch vụ thì bỏ mã đã chọn, tránh gửi lên mã không còn ý nghĩa.
+  useEffect(() => {
+    if (requiresMaterial) return;
+    items?.forEach((item, index) => {
+      if (item.materialId) setValue(`items.${index}.materialId`, '');
+    });
+  }, [requiresMaterial, items, setValue]);
 
   const estimatedTotal = items.reduce((sum, item) => {
     const qty = Number(item.quantity);
@@ -138,6 +174,7 @@ export default function NewPurchaseRequestPage() {
         items: values.items
           .filter((item) => item.name && item.quantity && item.unit)
           .map((item) => ({
+            ...(item.materialId ? { materialId: item.materialId } : {}),
             name: item.name,
             ...(item.specification ? { specification: item.specification } : {}),
             quantity: Number(item.quantity),
@@ -283,13 +320,58 @@ export default function NewPurchaseRequestPage() {
             <CardTitle>Danh sách hàng hóa / dịch vụ</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
+              {!categoryId
+                ? 'Chọn lĩnh vực ở trên trước. Nhóm hàng hóa bắt buộc chọn mã vật tư cho từng dòng, nhóm dịch vụ thì không.'
+                : requiresMaterial
+                  ? 'Nhóm hàng hóa bắt buộc chọn mã vật tư cho từng dòng. Chưa có mã phù hợp? Vào Danh mục vật tư để đề xuất mã mới, admin duyệt xong mới gửi duyệt yêu cầu được.'
+                  : 'Nhóm dịch vụ không cần mã vật tư — mô tả trực tiếp nội dung công việc.'}
+            </p>
             {fields.map((field, index) => (
               <div
                 key={field.id}
                 className="grid gap-3 rounded-lg border border-border p-4 sm:grid-cols-12"
               >
-                <div className="sm:col-span-5">
-                  <Label required>Tên hàng</Label>
+                {requiresMaterial ? (
+                <div className="sm:col-span-4">
+                  <Label required>Mã vật tư</Label>
+                  <Select
+                    {...register(`items.${index}.materialId`, {
+                      required:
+                        categoryId && requiresMaterial ? 'Chọn mã vật tư' : false,
+                      onChange: (e) => {
+                        // Chọn mã thì điền sẵn tên, đơn vị và giá tham chiếu —
+                        // vẫn sửa được nếu lần mua này khác chuẩn.
+                        const picked = materials.data?.data.find(
+                          (m) => m.id === e.target.value,
+                        );
+                        if (!picked) return;
+                        setValue(`items.${index}.name`, picked.name);
+                        setValue(`items.${index}.unit`, picked.unit);
+                        if (picked.standardPrice) {
+                          setValue(
+                            `items.${index}.estimatedPrice`,
+                            String(Number(picked.standardPrice)),
+                          );
+                        }
+                        if (picked.specification) {
+                          setValue(`items.${index}.specification`, picked.specification);
+                        }
+                      },
+                    })}
+                  >
+                    <option value="">— Chọn mã —</option>
+                    {materials.data?.data.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.code} — {m.name}
+                      </option>
+                    ))}
+                  </Select>
+                  <FieldError message={errors.items?.[index]?.materialId?.message} />
+                </div>
+                ) : null}
+                <div className={requiresMaterial ? 'sm:col-span-4' : 'sm:col-span-5'}>
+                  <Label required>{requiresMaterial ? 'Tên hàng' : 'Nội dung dịch vụ'}</Label>
                   <Input
                     {...register(`items.${index}.name`, {
                       required: index === 0 ? 'Nhập ít nhất một dòng hàng' : false,
@@ -318,7 +400,7 @@ export default function NewPurchaseRequestPage() {
                   />
                   <FieldError message={errors.items?.[index]?.unit?.message} />
                 </div>
-                <div className="sm:col-span-2">
+                <div className="sm:col-span-3">
                   <Label>Đơn giá dự kiến</Label>
                   <Input
                     type="number"

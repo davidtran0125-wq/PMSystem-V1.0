@@ -154,18 +154,18 @@ export default function QuotationReaderPage() {
             {result.items.length ? (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead className="border-y border-border bg-muted/50 text-left">
+                  <thead className="border-y border-border bg-muted/40 text-left">
                     <tr>
-                      <th className="px-4 py-2 font-medium">Hàng hóa</th>
-                      <th className="px-4 py-2 font-medium">Số lượng</th>
-                      <th className="px-4 py-2 font-medium">Đơn giá</th>
-                      <th className="px-4 py-2 font-medium">Thành tiền</th>
+                      <th className="cell-head">Hàng hóa</th>
+                      <th className="cell-head">Số lượng</th>
+                      <th className="cell-head">Đơn giá</th>
+                      <th className="cell-head">Thành tiền</th>
                     </tr>
                   </thead>
                   <tbody>
                     {result.items.map((item, i) => (
                       <tr key={i} className="border-b border-border last:border-0">
-                        <td className="px-4 py-2">
+                        <td className="cell">
                           <p>{item.name}</p>
                           {item.description ? (
                             <p className="text-xs text-muted-foreground">
@@ -173,13 +173,13 @@ export default function QuotationReaderPage() {
                             </p>
                           ) : null}
                         </td>
-                        <td className="px-4 py-2 tabular-nums">
+                        <td className="cell tabular-nums">
                           {item.quantity.toLocaleString('vi-VN')} {item.unit}
                         </td>
-                        <td className="px-4 py-2 tabular-nums">
+                        <td className="cell tabular-nums">
                           {formatCurrency(item.unitPrice, result.currency ?? 'VND')}
                         </td>
-                        <td className="px-4 py-2 tabular-nums">
+                        <td className="cell tabular-nums">
                           {formatCurrency(
                             item.quantity * item.unitPrice,
                             result.currency ?? 'VND',

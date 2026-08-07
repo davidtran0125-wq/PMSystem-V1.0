@@ -41,6 +41,13 @@ export class ContractsController {
     return this.service.findAll(dto);
   }
 
+  @Get('contracts/status-counts')
+  @RequirePermissions(PERMISSIONS.CONTRACT_READ)
+  @ApiOperation({ summary: 'Số hợp đồng theo từng trạng thái' })
+  contractStatusCounts(@Query() dto: QueryContractDto) {
+    return this.service.statusCounts(dto);
+  }
+
   @Get('contracts/:id')
   @RequirePermissions(PERMISSIONS.CONTRACT_READ)
   findOne(@Param('id', ParseUUIDPipe) id: string) {
@@ -79,6 +86,13 @@ export class ContractsController {
   @ApiOperation({ summary: 'Danh sách chứng chỉ nhà cung cấp' })
   findCertificates(@Query() dto: QueryCertificateDto) {
     return this.service.findCertificates(dto);
+  }
+
+  @Get('certificates/status-counts')
+  @RequirePermissions(PERMISSIONS.CERTIFICATE_READ)
+  @ApiOperation({ summary: 'Số chứng chỉ theo từng trạng thái' })
+  certificateStatusCounts(@Query() dto: QueryCertificateDto) {
+    return this.service.certificateStatusCounts(dto);
   }
 
   @Post('certificates')

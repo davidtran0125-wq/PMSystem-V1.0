@@ -1,4 +1,11 @@
-import { Controller, Get, Param, ParseIntPipe, Query, Res } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Param,
+  ParseIntPipe,
+  Query,
+  Res,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import {
@@ -57,7 +64,7 @@ export class ReportsController {
     const stamp = new Date().toISOString().slice(0, 10);
 
     if (format === 'csv') {
-      const csv = await this.service.toCsv(table);
+      const csv = this.service.toCsv(table);
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader(
         'Content-Disposition',

@@ -25,6 +25,21 @@ const ROLE_LABELS: Record<string, string> = {
   [ROLES.WAREHOUSE]: 'Warehouse',
 };
 
+/**
+ * Nhóm mua dịch vụ: không quản lý bằng mã vật tư, nên yêu cầu mua thuộc các
+ * nhóm này được nhập tự do phần mô tả công việc.
+ */
+const SERVICE_CATEGORIES = new Set([
+  'SERVICE',
+  'SOFTWARE',
+  'LOGISTICS',
+  'TRUCKING',
+  'OCEAN_FREIGHT',
+  'AIR_FREIGHT',
+  'CUSTOMS',
+  'MARKETING',
+]);
+
 const CATEGORIES = [
   { code: 'CHEMICAL', name: 'Hóa chất', nameEn: 'Chemical' },
   { code: 'PACKAGING', name: 'Bao bì', nameEn: 'Packaging' },
@@ -130,10 +145,11 @@ async function seedRoles() {
 
 async function seedCategoriesAndForms() {
   for (const category of CATEGORIES) {
+    const requiresMaterial = !SERVICE_CATEGORIES.has(category.code);
     const row = await prisma.category.upsert({
       where: { code: category.code },
-      update: { name: category.name, nameEn: category.nameEn },
-      create: category,
+      update: { name: category.name, nameEn: category.nameEn, requiresMaterial },
+      create: { ...category, requiresMaterial },
     });
 
     const fields = FORMS[category.code];
@@ -202,6 +218,10 @@ async function seedUsers() {
   const production = await prisma.department.findUniqueOrThrow({
     where: { code: 'PROD' },
   });
+  const finance = await prisma.department.findUniqueOrThrow({
+    where: { code: 'FIN' },
+  });
+  const qa = await prisma.department.findUniqueOrThrow({ where: { code: 'QA' } });
 
   const accounts = [
     {
@@ -226,6 +246,32 @@ async function seedUsers() {
       email: 'manager@pms.local',
       fullName: 'Department Manager Le',
       role: ROLES.DEPARTMENT_MANAGER,
+      departmentId: production.id,
+    },
+    // Hai cấp cuối của chuỗi duyệt cho yêu cầu trên 500 triệu.
+    {
+      email: 'finance@pms.local',
+      fullName: 'Finance Pham',
+      role: ROLES.FINANCE,
+      departmentId: finance.id,
+    },
+    {
+      email: 'director@pms.local',
+      fullName: 'Director Vo',
+      role: ROLES.PROCUREMENT_MANAGER,
+      departmentId: procurement.id,
+    },
+    // Hai vai trò còn lại, để cả 9 vai trò đều demo được.
+    {
+      email: 'qa@pms.local',
+      fullName: 'QA Hoang',
+      role: ROLES.QA,
+      departmentId: qa.id,
+    },
+    {
+      email: 'warehouse@pms.local',
+      fullName: 'Warehouse Dang',
+      role: ROLES.WAREHOUSE,
       departmentId: production.id,
     },
   ];
@@ -345,6 +391,31 @@ async function seedSuppliers() {
   }
 }
 
+/**
+ * Bộ tiêu chí đánh giá mặc định. Người dùng có thể sửa, thêm, tắt hoặc đổi
+ * trọng số trong phần Thiết lập — seed chỉ tạo lần đầu, không ghi đè.
+ */
+async function seedEvaluationCriteria() {
+  const defaults = [
+    { name: 'Giá', description: 'Mức giá so với mặt bằng thị trường', weight: 25 },
+    { name: 'Chất lượng', description: 'Chất lượng hàng hóa / dịch vụ giao nhận', weight: 30 },
+    { name: 'Giao hàng', description: 'Đúng hạn, đúng số lượng, đóng gói đạt yêu cầu', weight: 20 },
+    { name: 'Thời gian phản hồi', description: 'Tốc độ phản hồi yêu cầu và báo giá', weight: 10 },
+    { name: 'Hợp tác', description: 'Thiện chí xử lý sự cố và hỗ trợ kỹ thuật', weight: 15 },
+  ];
+
+  for (const [index, entry] of defaults.entries()) {
+    const existing = await prisma.evaluationCriteria.findFirst({
+      where: { name: entry.name, deletedAt: null },
+    });
+    if (existing) continue;
+
+    await prisma.evaluationCriteria.create({
+      data: { ...entry, sortOrder: index, maxScore: 5, isSystem: true },
+    });
+  }
+}
+
 async function seedApprovalWorkflows() {
   const buyerRole = await prisma.role.findUniqueOrThrow({
     where: { code: ROLES.BUYER },
@@ -357,6 +428,9 @@ async function seedApprovalWorkflows() {
   });
   const financeRole = await prisma.role.findUniqueOrThrow({
     where: { code: ROLES.FINANCE },
+  });
+  const adminRole = await prisma.role.findUniqueOrThrow({
+    where: { code: ROLES.SUPER_ADMIN },
   });
 
   const tiers = [
@@ -388,7 +462,42 @@ async function seedApprovalWorkflows() {
     },
   ];
 
-  for (const tier of tiers) {
+  // Đơn hàng duyệt gọn hơn yêu cầu mua: giá đã chốt qua đấu thầu rồi, nên chỉ
+  // cần soát lại trước khi phát hành ra ngoài.
+  const orderTiers = [
+    {
+      name: 'Đơn hàng dưới 200 triệu',
+      minAmount: 0,
+      maxAmount: 200_000_000,
+      steps: [{ name: 'Trưởng bộ phận mua hàng', roleId: directorRole.id }],
+    },
+    {
+      name: 'Đơn hàng từ 200 triệu đến 1 tỷ',
+      minAmount: 200_000_000,
+      maxAmount: 1_000_000_000,
+      steps: [
+        { name: 'Trưởng bộ phận mua hàng', roleId: directorRole.id },
+        { name: 'Kế toán trưởng', roleId: financeRole.id },
+      ],
+    },
+    {
+      name: 'Đơn hàng trên 1 tỷ',
+      minAmount: 1_000_000_000,
+      maxAmount: null,
+      steps: [
+        { name: 'Trưởng bộ phận mua hàng', roleId: directorRole.id },
+        { name: 'Kế toán trưởng', roleId: financeRole.id },
+        { name: 'Ban giám đốc', roleId: adminRole.id },
+      ],
+    },
+  ];
+
+  const all = [
+    ...tiers.map((t) => ({ ...t, appliesTo: 'PURCHASE_REQUEST' as const })),
+    ...orderTiers.map((t) => ({ ...t, appliesTo: 'PURCHASE_ORDER' as const })),
+  ];
+
+  for (const tier of all) {
     const existing = await prisma.approvalWorkflow.findFirst({
       where: { name: tier.name },
     });
@@ -397,6 +506,7 @@ async function seedApprovalWorkflows() {
     await prisma.approvalWorkflow.create({
       data: {
         name: tier.name,
+        appliesTo: tier.appliesTo,
         minAmount: tier.minAmount,
         maxAmount: tier.maxAmount,
         steps: {
@@ -411,6 +521,94 @@ async function seedApprovalWorkflows() {
   }
 }
 
+/**
+ * Vài mã vật tư mẫu đã ban hành, để danh mục và lịch sử đặt hàng có dữ liệu
+ * ngay từ lần chạy đầu.
+ */
+async function seedMaterials() {
+  const admin = await prisma.user.findUnique({
+    where: { email: process.env.SEED_ADMIN_EMAIL ?? 'admin@pms.local' },
+  });
+  const byCode = async (code: string) =>
+    prisma.category.findUnique({ where: { code } });
+
+  const chemical = await byCode('CHEMICAL');
+  const packaging = (await byCode('PACKAGING')) ?? chemical;
+  const machine = await byCode('MACHINE');
+
+  const materials = [
+    {
+      code: 'HC-NAOH-32',
+      name: 'Xút NaOH 32%',
+      nameEn: 'Sodium hydroxide 32%',
+      specification: 'CAS 1310-73-2, nồng độ 32% ± 0,5%, xe bồn hoặc IBC 1000L',
+      unit: 'kg',
+      categoryId: chemical?.id,
+      hsCode: '28151100',
+      standardPrice: 19000,
+      minStock: 2000,
+    },
+    {
+      code: 'HC-H2SO4-98',
+      name: 'Axit sulfuric 98%',
+      nameEn: 'Sulfuric acid 98%',
+      specification: 'CAS 7664-93-9, tinh khiết kỹ thuật, phuy 35L',
+      unit: 'kg',
+      categoryId: chemical?.id,
+      hsCode: '28070010',
+      standardPrice: 12500,
+      minStock: 1000,
+    },
+    {
+      code: 'BB-CAN-25L',
+      name: 'Can nhựa HDPE 25L',
+      nameEn: 'HDPE jerrycan 25L',
+      specification: 'HDPE nguyên sinh, nắp ren có gioăng, chịu hóa chất',
+      unit: 'cái',
+      categoryId: packaging?.id,
+      standardPrice: 52000,
+      minStock: 200,
+    },
+    {
+      code: 'BB-IBC-1000',
+      name: 'Bồn IBC 1000L',
+      nameEn: 'IBC tank 1000L',
+      specification: 'Khung thép, ruột HDPE, van xả DN50',
+      unit: 'cái',
+      categoryId: packaging?.id,
+      standardPrice: 2350000,
+      minStock: 20,
+    },
+    {
+      code: 'MTB-BOM-CN40',
+      name: 'Bơm ly tâm hóa chất CN40',
+      nameEn: 'Chemical centrifugal pump CN40',
+      specification: 'Lưu lượng 40 m³/h, cột áp 32 m, vật liệu PP, motor 7,5 kW',
+      unit: 'bộ',
+      categoryId: machine?.id,
+      manufacturer: 'Ebara',
+      standardPrice: 48000000,
+      minStock: 1,
+    },
+  ];
+
+  for (const m of materials) {
+    await prisma.material.upsert({
+      where: { code: m.code },
+      update: {},
+      create: {
+        ...m,
+        status: 'ACTIVE',
+        createdById: admin?.id,
+        approvedById: admin?.id,
+        approvedAt: new Date(),
+      },
+    });
+  }
+
+  console.log(`  ${materials.length} mã vật tư mẫu`);
+}
+
 async function main() {
   await seedPermissions();
   await seedRoles();
@@ -418,6 +616,8 @@ async function main() {
   await seedCategoriesAndForms();
   await seedUsers();
   await seedSuppliers();
+  await seedEvaluationCriteria();
+  await seedMaterials();
   await seedApprovalWorkflows();
   console.log('Seed completed');
 }

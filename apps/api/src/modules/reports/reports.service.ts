@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { PurchaseOrderStatus, QuotationStatus, RfqStatus } from '@prisma/client';
+import { QuotationStatus } from '@prisma/client';
 import * as ExcelJS from 'exceljs';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DashboardService } from '../dashboard/dashboard.service';
@@ -54,9 +54,15 @@ export class ReportsService {
     }
   }
 
-  async toCsv(table: ReportTable): Promise<string> {
+  toCsv(table: ReportTable): string {
     const escape = (value: unknown) => {
-      const text = value === null || value === undefined ? '' : String(value);
+      const text =
+        value === null || value === undefined
+          ? ''
+          : typeof value === 'object'
+            ? (value as { toString(): string }).toString()
+            : // eslint-disable-next-line @typescript-eslint/no-base-to-string
+              String(value);
       return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
     };
     const header = table.columns.map((c) => escape(c.header)).join(',');
@@ -64,7 +70,7 @@ export class ReportsService {
       .map((row) => table.columns.map((c) => escape(row[c.key])).join(','))
       .join('\n');
     // BOM so Excel opens Vietnamese text in UTF-8 rather than mangling it.
-    return `﻿${header}\n${body}`;
+    return `\uFEFF${header}\n${body}`;
   }
 
   async toExcel(table: ReportTable): Promise<Uint8Array> {
@@ -133,8 +139,14 @@ export class ReportsService {
       include: {
         supplier: { select: { code: true, companyName: true } },
         evaluator: { select: { fullName: true } },
+        scores: { include: { criteria: { select: { name: true } } } },
       },
     });
+
+    // Tiêu chí do người dùng tự định nghĩa nên số cột phụ thuộc dữ liệu.
+    const criteriaNames = [
+      ...new Set(rows.flatMap((r) => r.scores.map((s) => s.criteria.name))),
+    ];
 
     return {
       title: 'Danh gia NCC',
@@ -142,26 +154,29 @@ export class ReportsService {
         { key: 'code', header: 'Mã NCC', width: 16 },
         { key: 'supplier', header: 'Nhà cung cấp', width: 32 },
         { key: 'period', header: 'Kỳ đánh giá', width: 24 },
-        { key: 'price', header: 'Giá', width: 8 },
-        { key: 'quality', header: 'Chất lượng', width: 12 },
-        { key: 'delivery', header: 'Giao hàng', width: 12 },
-        { key: 'response', header: 'Phản hồi', width: 12 },
-        { key: 'cooperation', header: 'Hợp tác', width: 12 },
+        ...criteriaNames.map((name) => ({
+          key: `c_${name}`,
+          header: name,
+          width: 14,
+        })),
         { key: 'complaint', header: 'Khiếu nại (%)', width: 14 },
         { key: 'total', header: 'Tổng điểm', width: 12 },
+        { key: 'note', header: 'Nhận xét', width: 40 },
         { key: 'evaluator', header: 'Người đánh giá', width: 22 },
       ],
       rows: rows.map((r) => ({
         code: r.supplier.code,
         supplier: r.supplier.companyName,
         period: `${r.periodStart.toLocaleDateString('vi-VN')} – ${r.periodEnd.toLocaleDateString('vi-VN')}`,
-        price: r.priceScore,
-        quality: r.qualityScore,
-        delivery: r.deliveryScore,
-        response: r.responseScore,
-        cooperation: r.cooperationScore,
+        ...Object.fromEntries(
+          r.scores.map((s) => [
+            `c_${s.criteria.name}`,
+            s.comment ? `${s.score} — ${s.comment}` : s.score,
+          ]),
+        ),
         complaint: Number(r.complaintRate),
         total: Number(r.totalScore),
+        note: r.note ?? '',
         evaluator: r.evaluator.fullName,
       })),
     };
@@ -181,9 +196,16 @@ export class ReportsService {
     });
     const byId = new Map(categories.map((c) => [c.id, c]));
 
-    const totals = new Map<string, { total: number; approved: number; rejected: number }>();
+    const totals = new Map<
+      string,
+      { total: number; approved: number; rejected: number }
+    >();
     for (const row of requests) {
-      const entry = totals.get(row.categoryId) ?? { total: 0, approved: 0, rejected: 0 };
+      const entry = totals.get(row.categoryId) ?? {
+        total: 0,
+        approved: 0,
+        rejected: 0,
+      };
       entry.total += row._count._all;
       if (row.status === 'APPROVED') entry.approved += row._count._all;
       if (row.status === 'REJECTED') entry.rejected += row._count._all;
@@ -235,14 +257,24 @@ export class ReportsService {
 
     const stats = new Map<
       string,
-      { name: string; handled: number; approved: number; rejected: number; hours: number[] }
+      {
+        name: string;
+        handled: number;
+        approved: number;
+        rejected: number;
+        hours: number[];
+      }
     >();
 
     for (const r of requests) {
       if (!r.buyerId) continue;
-      const entry =
-        stats.get(r.buyerId) ??
-        { name: r.buyer?.fullName ?? r.buyerId, handled: 0, approved: 0, rejected: 0, hours: [] };
+      const entry = stats.get(r.buyerId) ?? {
+        name: r.buyer?.fullName ?? r.buyerId,
+        handled: 0,
+        approved: 0,
+        rejected: 0,
+        hours: [],
+      };
       entry.handled += 1;
       if (r.status === 'APPROVED') entry.approved += 1;
       if (r.status === 'REJECTED') entry.rejected += 1;
@@ -270,7 +302,11 @@ export class ReportsService {
           approved: s.approved,
           rejected: s.rejected,
           avgHours: s.hours.length
-            ? Number((s.hours.reduce((a, b) => a + b, 0) / s.hours.length).toFixed(2))
+            ? Number(
+                (s.hours.reduce((a, b) => a + b, 0) / s.hours.length).toFixed(
+                  2,
+                ),
+              )
             : 0,
         }))
         .sort((a, b) => b.handled - a.handled),
@@ -346,7 +382,8 @@ export class ReportsService {
       include: {
         purchaseRequest: { select: { code: true } },
         buyer: { select: { fullName: true } },
-        awardedQuotation: {
+        quotations: {
+          where: { deletedAt: null, status: QuotationStatus.AWARDED },
           include: { supplier: { select: { companyName: true } } },
         },
         _count: { select: { suppliers: true, quotations: true } },
@@ -362,7 +399,7 @@ export class ReportsService {
         { key: 'buyer', header: 'Buyer', width: 22 },
         { key: 'invited', header: 'NCC mời', width: 12 },
         { key: 'quoted', header: 'Đã báo giá', width: 14 },
-        { key: 'winner', header: 'NCC trúng thầu', width: 30 },
+        { key: 'winner', header: 'NCC trúng thầu', width: 36 },
         { key: 'value', header: 'Giá trúng thầu', width: 20 },
         { key: 'status', header: 'Trạng thái', width: 16 },
       ],
@@ -373,8 +410,10 @@ export class ReportsService {
         buyer: r.buyer.fullName,
         invited: r._count.suppliers,
         quoted: r._count.quotations,
-        winner: r.awardedQuotation?.supplier.companyName ?? '',
-        value: r.awardedQuotation ? Number(r.awardedQuotation.totalAmount) : '',
+        winner: r.quotations.map((q) => q.supplier.companyName).join(', '),
+        value: r.quotations.length
+          ? r.quotations.reduce((sum, q) => sum + Number(q.totalAmount), 0)
+          : '',
         status: r.status,
       })),
     };

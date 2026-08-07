@@ -8,6 +8,7 @@ import { CertificateStatus, ContractStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { paginate } from '../../common/dto/pagination.dto';
+import { countByStatus } from '../../common/status-counts';
 import {
   certificateStatusFor,
   contractStatusFor,
@@ -33,17 +34,19 @@ export class ContractsService {
 
   // ---------------------------------------------------------------- contracts
 
-  async findAll(dto: QueryContractDto) {
+  /** Điều kiện lọc dùng chung cho danh sách và cho phần đếm theo trạng thái. */
+  private listWhere(
+    dto: QueryContractDto,
+    opts: { ignoreStatus?: boolean } = {},
+  ): Prisma.ContractWhereInput {
     const in90 = new Date();
     in90.setDate(in90.getDate() + 90);
 
-    const where: Prisma.ContractWhereInput = {
+    return {
       deletedAt: null,
-      ...(dto.status ? { status: dto.status } : {}),
+      ...(dto.status && !opts.ignoreStatus ? { status: dto.status } : {}),
       ...(dto.supplierId ? { supplierId: dto.supplierId } : {}),
-      ...(dto.expiringOnly
-        ? { endDate: { gte: new Date(), lte: in90 } }
-        : {}),
+      ...(dto.expiringOnly ? { endDate: { gte: new Date(), lte: in90 } } : {}),
       ...(dto.search
         ? {
             OR: [
@@ -53,6 +56,19 @@ export class ContractsService {
           }
         : {}),
     };
+  }
+
+  /** Số hợp đồng theo từng trạng thái. */
+  async statusCounts(dto: QueryContractDto) {
+    return countByStatus(
+      this.prisma.contract,
+      this.listWhere(dto, { ignoreStatus: true }),
+      ContractStatus,
+    );
+  }
+
+  async findAll(dto: QueryContractDto) {
+    const where = this.listWhere(dto);
 
     const [rows, total] = await this.prisma.$transaction([
       this.prisma.contract.findMany({
@@ -70,7 +86,10 @@ export class ContractsService {
       this.prisma.contract.count({ where }),
     ]);
 
-    const data = rows.map((c) => ({ ...c, daysRemaining: daysUntil(c.endDate) }));
+    const data = rows.map((c) => ({
+      ...c,
+      daysRemaining: daysUntil(c.endDate),
+    }));
     return paginate(data, total, dto);
   }
 
@@ -124,7 +143,9 @@ export class ContractsService {
     });
     if (!current) throw new NotFoundException('Không tìm thấy hợp đồng');
 
-    const startDate = dto.startDate ? new Date(dto.startDate) : current.startDate;
+    const startDate = dto.startDate
+      ? new Date(dto.startDate)
+      : current.startDate;
     const endDate = dto.endDate ? new Date(dto.endDate) : current.endDate;
     if (endDate <= startDate) {
       throw new BadRequestException('Ngày kết thúc phải sau ngày bắt đầu');
@@ -181,13 +202,17 @@ export class ContractsService {
 
   // ------------------------------------------------------------- certificates
 
-  async findCertificates(dto: QueryCertificateDto) {
+  /** Điều kiện lọc dùng chung cho danh sách và cho phần đếm theo trạng thái. */
+  private certificateWhere(
+    dto: QueryCertificateDto,
+    opts: { ignoreStatus?: boolean } = {},
+  ): Prisma.CertificateWhereInput {
     const in90 = new Date();
     in90.setDate(in90.getDate() + 90);
 
-    const where: Prisma.CertificateWhereInput = {
+    return {
       deletedAt: null,
-      ...(dto.status ? { status: dto.status } : {}),
+      ...(dto.status && !opts.ignoreStatus ? { status: dto.status } : {}),
       ...(dto.supplierId ? { supplierId: dto.supplierId } : {}),
       ...(dto.expiringOnly
         ? { expiryDate: { gte: new Date(), lte: in90 } }
@@ -201,6 +226,19 @@ export class ContractsService {
           }
         : {}),
     };
+  }
+
+  /** Số chứng chỉ theo từng trạng thái. */
+  async certificateStatusCounts(dto: QueryCertificateDto) {
+    return countByStatus(
+      this.prisma.certificate,
+      this.certificateWhere(dto, { ignoreStatus: true }),
+      CertificateStatus,
+    );
+  }
+
+  async findCertificates(dto: QueryCertificateDto) {
+    const where = this.certificateWhere(dto);
 
     const [rows, total] = await this.prisma.$transaction([
       this.prisma.certificate.findMany({
@@ -265,7 +303,9 @@ export class ContractsService {
     });
     if (!current) throw new NotFoundException('Không tìm thấy chứng chỉ');
 
-    const issueDate = dto.issueDate ? new Date(dto.issueDate) : current.issueDate;
+    const issueDate = dto.issueDate
+      ? new Date(dto.issueDate)
+      : current.issueDate;
     const expiryDate = dto.expiryDate
       ? new Date(dto.expiryDate)
       : current.expiryDate;

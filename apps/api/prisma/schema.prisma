@@ -80,6 +80,12 @@ enum CertificateStatus {
   REVOKED
 }
 
+/// Một bộ quy trình duyệt dùng cho yêu cầu mua hàng hoặc cho đơn hàng.
+enum ApprovalTarget {
+  PURCHASE_REQUEST
+  PURCHASE_ORDER
+}
+
 enum ApprovalDecision {
   PENDING
   APPROVED
@@ -144,6 +150,25 @@ enum EntityType {
   CERTIFICATE
   USER
   CATEGORY
+}
+
+enum MaterialStatus {
+  PENDING // Mã mới do người dùng đề xuất, chờ admin duyệt
+  ACTIVE
+  INACTIVE // Đã ngừng dùng, vẫn giữ để tra cứu đơn hàng cũ
+}
+
+enum MaterialChangeType {
+  CREATE
+  UPDATE
+  DELETE
+}
+
+enum MaterialChangeStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
 }
 
 enum PurchaseOrderStatus {
@@ -225,21 +250,27 @@ model User {
   department Department? @relation(fields: [departmentId], references: [id])
   supplier   Supplier?   @relation(fields: [supplierId], references: [id])
 
-  roles              UserRole[]
-  refreshTokens      RefreshToken[]
-  managedDepartments Department[]          @relation("DepartmentManager")
-  purchaseRequests   PurchaseRequest[]     @relation("PurchaseRequestRequester")
-  assignedRequests   PurchaseRequest[]     @relation("PurchaseRequestBuyer")
-  approvalHistories  ApprovalHistory[]
-  rfqsCreated        Rfq[]                 @relation("RfqBuyer")
-  comments           Comment[]
-  notifications      Notification[]
-  uploads            Attachment[]
-  auditLogs          AuditLog[]
-  activityLogs       ActivityLog[]
-  contractsOwned     Contract[]            @relation("ContractBuyer")
-  purchaseOrders     PurchaseOrder[]       @relation("PurchaseOrderBuyer")
-  performanceReviews SupplierPerformance[]
+  roles                    UserRole[]
+  refreshTokens            RefreshToken[]
+  managedDepartments       Department[]            @relation("DepartmentManager")
+  purchaseRequests         PurchaseRequest[]       @relation("PurchaseRequestRequester")
+  assignedRequests         PurchaseRequest[]       @relation("PurchaseRequestBuyer")
+  approvalHistories        ApprovalHistory[]
+  rfqsCreated              Rfq[]                   @relation("RfqBuyer")
+  comments                 Comment[]
+  notifications            Notification[]
+  uploads                  Attachment[]
+  auditLogs                AuditLog[]
+  activityLogs             ActivityLog[]
+  contractsOwned           Contract[]              @relation("ContractBuyer")
+  purchaseOrders           PurchaseOrder[]         @relation("PurchaseOrderBuyer")
+  performanceReviews       SupplierPerformance[]
+  materialsCreated         Material[]              @relation("MaterialCreatedBy")
+  materialsApproved        Material[]              @relation("MaterialApprovedBy")
+  materialChangesRequested MaterialChangeRequest[] @relation("MaterialChangeRequestedBy")
+  materialChangesReviewed  MaterialChangeRequest[] @relation("MaterialChangeReviewedBy")
+  commentMentions          CommentMention[]
+  orderRevisions           PurchaseOrderRevision[]
 
   @@index([departmentId])
   @@index([supplierId])
@@ -315,16 +346,19 @@ model Project {
 // ---------------------------------------------------------------------------
 
 model Category {
-  id          String    @id @default(uuid())
-  name        String
-  nameEn      String?
-  code        String    @unique
-  description String?
-  parentId    String?
-  isActive    Boolean   @default(true)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  deletedAt   DateTime?
+  id               String    @id @default(uuid())
+  name             String
+  nameEn           String?
+  code             String    @unique
+  description      String?
+  parentId         String?
+  isActive         Boolean   @default(true)
+  /// Nhóm hàng hóa bắt buộc chọn mã vật tư khi lập yêu cầu mua; nhóm dịch vụ
+  /// thì không, vì không có mã để quản lý tồn và lịch sử giá theo đơn vị.
+  requiresMaterial Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
 
   parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id])
   children Category[] @relation("CategoryTree")
@@ -333,6 +367,7 @@ model Category {
   purchaseRequests   PurchaseRequest[]
   supplierCategories SupplierCategory[]
   contracts          Contract[]
+  materials          Material[]
 
   @@index([parentId])
   @@map("categories")
@@ -454,12 +489,21 @@ model PurchaseRequest {
   @@index([buyerId])
   @@index([categoryId])
   @@index([departmentId])
+  // Danh sách luôn lọc bản chưa xóa rồi sắp theo ngày tạo giảm dần. Không có
+  // chỉ mục này, mỗi lần mở trang một là một lần sắp xếp toàn bảng.
+  @@index([deletedAt, createdAt])
+  // Lọc theo trạng thái rồi vẫn sắp theo ngày tạo — dùng cho dải nút trạng thái.
+  @@index([deletedAt, status, createdAt])
+  // Ô tìm kiếm còn có chỉ mục GIN trigram trên `code` và `title`, khai báo tay
+  // trong migration 20260807164500_search_trigram_indexes vì Prisma không mô tả
+  // được toán tử lớp gin_trgm_ops. Đừng xóa chúng khi sinh migration mới.
   @@map("purchase_requests")
 }
 
 model PurchaseRequestItem {
   id                String   @id @default(uuid())
   purchaseRequestId String
+  materialId        String?
   lineNo            Int
   name              String
   description       String?  @db.Text
@@ -471,10 +515,13 @@ model PurchaseRequestItem {
   updatedAt         DateTime @updatedAt
 
   purchaseRequest PurchaseRequest @relation(fields: [purchaseRequestId], references: [id], onDelete: Cascade)
+  material        Material?       @relation(fields: [materialId], references: [id])
   quotationItems  QuotationItem[]
 
   @@unique([purchaseRequestId, lineNo])
   @@index([purchaseRequestId])
+  // Lịch sử giá lọc theo mã vật tư trên mọi màn duyệt, không có chỉ mục là quét cả bảng.
+  @@index([materialId])
   @@map("purchase_request_items")
 }
 
@@ -483,22 +530,24 @@ model PurchaseRequestItem {
 // ---------------------------------------------------------------------------
 
 model ApprovalWorkflow {
-  id           String    @id @default(uuid())
+  id           String         @id @default(uuid())
   name         String
   description  String?
+  appliesTo    ApprovalTarget @default(PURCHASE_REQUEST)
   categoryId   String?
   departmentId String?
-  minAmount    Decimal?  @db.Decimal(18, 2)
-  maxAmount    Decimal?  @db.Decimal(18, 2)
-  currency     String    @default("VND")
-  isActive     Boolean   @default(true)
-  priority     Int       @default(0) // higher wins when several match
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  minAmount    Decimal?       @db.Decimal(18, 2)
+  maxAmount    Decimal?       @db.Decimal(18, 2)
+  currency     String         @default("VND")
+  isActive     Boolean        @default(true)
+  priority     Int            @default(0) // higher wins when several match
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
   deletedAt    DateTime?
 
   steps            ApprovalStep[]
   purchaseRequests PurchaseRequest[]
+  purchaseOrders   PurchaseOrder[]
 
   @@map("approval_workflows")
 }
@@ -518,14 +567,18 @@ model ApprovalStep {
   role            Role?             @relation(fields: [roleId], references: [id])
   histories       ApprovalHistory[]
   currentRequests PurchaseRequest[] @relation("CurrentStep")
+  currentOrders   PurchaseOrder[]   @relation("CurrentOrderStep")
 
   @@unique([workflowId, stepOrder])
   @@map("approval_steps")
 }
 
+/// Dùng chung cho cả yêu cầu mua hàng và đơn hàng; đúng một trong hai khóa
+/// ngoại được điền.
 model ApprovalHistory {
   id                String           @id @default(uuid())
-  purchaseRequestId String
+  purchaseRequestId String?
+  purchaseOrderId   String?
   stepId            String?
   actorId           String
   decision          ApprovalDecision
@@ -534,11 +587,13 @@ model ApprovalHistory {
   toStatus          String?
   createdAt         DateTime         @default(now())
 
-  purchaseRequest PurchaseRequest @relation(fields: [purchaseRequestId], references: [id], onDelete: Cascade)
-  step            ApprovalStep?   @relation(fields: [stepId], references: [id])
-  actor           User            @relation(fields: [actorId], references: [id])
+  purchaseRequest PurchaseRequest? @relation(fields: [purchaseRequestId], references: [id], onDelete: Cascade)
+  purchaseOrder   PurchaseOrder?   @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  step            ApprovalStep?    @relation(fields: [stepId], references: [id])
+  actor           User             @relation(fields: [actorId], references: [id])
 
   @@index([purchaseRequestId])
+  @@index([purchaseOrderId])
   @@map("approval_histories")
 }
 
@@ -598,25 +653,63 @@ model SupplierCategory {
   @@map("supplier_categories")
 }
 
+/// Tiêu chí đánh giá nhà cung cấp, do người dùng tự định nghĩa trong phần
+/// Thiết lập. Trọng số tính theo phần trăm, tổng các tiêu chí đang bật nên
+/// bằng 100 để điểm tổng quy về thang 100.
+model EvaluationCriteria {
+  id          String    @id @default(uuid())
+  name        String
+  description String?
+  weight      Decimal   @db.Decimal(5, 2)
+  maxScore    Int       @default(5)
+  sortOrder   Int       @default(0)
+  isActive    Boolean   @default(true)
+  isSystem    Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  scores SupplierPerformanceScore[]
+
+  @@map("evaluation_criteria")
+}
+
+/// Điểm và nhận xét của một tiêu chí trong một kỳ đánh giá.
+model SupplierPerformanceScore {
+  id            String  @id @default(uuid())
+  performanceId String
+  criteriaId    String
+  score         Int
+  comment       String? @db.Text
+
+  performance SupplierPerformance @relation(fields: [performanceId], references: [id], onDelete: Cascade)
+  criteria    EvaluationCriteria  @relation(fields: [criteriaId], references: [id])
+
+  @@unique([performanceId, criteriaId])
+  @@index([performanceId])
+  @@map("supplier_performance_scores")
+}
+
 model SupplierPerformance {
   id               String   @id @default(uuid())
   supplierId       String
   evaluatorId      String
   periodStart      DateTime
   periodEnd        DateTime
-  priceScore       Int // 1..5
-  qualityScore     Int
-  deliveryScore    Int
-  responseScore    Int
-  cooperationScore Int
+  priceScore       Int? // cũ: giữ lại dữ liệu lịch sử, kỳ mới dùng bảng scores
+  qualityScore     Int?
+  deliveryScore    Int?
+  responseScore    Int?
+  cooperationScore Int?
   complaintRate    Decimal  @default(0) @db.Decimal(5, 2)
   totalScore       Decimal  @db.Decimal(5, 2)
   note             String?  @db.Text
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  supplier  Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
-  evaluator User     @relation(fields: [evaluatorId], references: [id])
+  supplier  Supplier                   @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  evaluator User                       @relation(fields: [evaluatorId], references: [id])
+  scores    SupplierPerformanceScore[]
 
   @@index([supplierId])
   @@map("supplier_performances")
@@ -627,26 +720,24 @@ model SupplierPerformance {
 // ---------------------------------------------------------------------------
 
 model Rfq {
-  id                 String    @id @default(uuid())
-  code               String    @unique // RFQ-2026-00001
-  title              String
-  purchaseRequestId  String
-  buyerId            String
-  status             RfqStatus @default(DRAFT)
-  instructions       String?   @db.Text
-  dueDate            DateTime?
-  sentAt             DateTime?
-  closedAt           DateTime?
-  awardedAt          DateTime?
-  awardedQuotationId String?   @unique
+  id                String    @id @default(uuid())
+  code              String    @unique // RFQ-2026-00001
+  title             String
+  purchaseRequestId String
+  buyerId           String
+  status            RfqStatus @default(DRAFT)
+  instructions      String?   @db.Text
+  dueDate           DateTime?
+  sentAt            DateTime?
+  closedAt          DateTime?
+  awardedAt         DateTime?
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  purchaseRequest  PurchaseRequest    @relation(fields: [purchaseRequestId], references: [id])
-  buyer            User               @relation("RfqBuyer", fields: [buyerId], references: [id])
-  awardedQuotation SupplierQuotation? @relation("AwardedQuotation", fields: [awardedQuotationId], references: [id])
+  purchaseRequest PurchaseRequest @relation(fields: [purchaseRequestId], references: [id])
+  buyer           User            @relation("RfqBuyer", fields: [buyerId], references: [id])
 
   suppliers      RfqSupplier[]
   quotations     SupplierQuotation[] @relation("RfqQuotations")
@@ -692,6 +783,7 @@ model SupplierQuotation {
   deliveryTerm String?
   remark       String?         @db.Text
   submittedAt  DateTime?
+  awardedAt    DateTime?
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -703,7 +795,6 @@ model SupplierQuotation {
   items          QuotationItem[]
   attachments    Attachment[]
   purchaseOrders PurchaseOrder[]
-  awardedFor     Rfq?            @relation("AwardedQuotation")
 
   @@unique([rfqId, supplierId])
   @@index([status])
@@ -714,6 +805,7 @@ model QuotationItem {
   id                    String   @id @default(uuid())
   quotationId           String
   purchaseRequestItemId String?
+  materialId            String?
   lineNo                Int
   name                  String
   description           String?  @db.Text
@@ -721,14 +813,18 @@ model QuotationItem {
   unit                  String
   unitPrice             Decimal  @db.Decimal(18, 2)
   lineTotal             Decimal  @db.Decimal(18, 2)
+  /// Cho phép chia thầu: mỗi dòng hàng có thể trao cho một nhà cung cấp khác nhau.
+  isAwarded             Boolean  @default(false)
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
   quotation           SupplierQuotation    @relation(fields: [quotationId], references: [id], onDelete: Cascade)
   purchaseRequestItem PurchaseRequestItem? @relation(fields: [purchaseRequestItemId], references: [id])
+  material            Material?            @relation(fields: [materialId], references: [id])
 
   @@unique([quotationId, lineNo])
   @@index([quotationId])
+  @@index([materialId])
   @@map("quotation_items")
 }
 
@@ -773,9 +869,19 @@ model PurchaseOrder {
   cancelledAt    DateTime?
   cancelReason   String?   @db.Text
 
+  /// Chuỗi duyệt được chốt lúc trình duyệt, nên đổi cấu hình về sau không làm
+  /// lệch các đơn đang chạy dở.
+  approvalWorkflowId     String?
+  currentStepId          String?
+  submittedForApprovalAt DateTime?
+  approvedAt             DateTime?
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
+
+  approvalWorkflow ApprovalWorkflow? @relation(fields: [approvalWorkflowId], references: [id])
+  currentStep      ApprovalStep?     @relation("CurrentOrderStep", fields: [currentStepId], references: [id])
 
   purchaseRequest PurchaseRequest    @relation(fields: [purchaseRequestId], references: [id])
   rfq             Rfq?               @relation(fields: [rfqId], references: [id])
@@ -783,13 +889,40 @@ model PurchaseOrder {
   supplier        Supplier           @relation(fields: [supplierId], references: [id])
   buyer           User               @relation("PurchaseOrderBuyer", fields: [buyerId], references: [id])
 
-  items       PurchaseOrderItem[]
-  attachments Attachment[]
+  items             PurchaseOrderItem[]
+  attachments       Attachment[]
+  approvalHistories ApprovalHistory[]
+  revisions         PurchaseOrderRevision[]
 
   @@index([status])
   @@index([supplierId])
   @@index([purchaseRequestId])
+  // "Đơn chờ tôi duyệt" lọc theo cấp đang chờ.
+  @@index([currentStepId])
   @@map("purchase_orders")
+}
+
+/// Mỗi lần sửa một đơn đã trình duyệt sẽ ghi lại một bản, kèm đúng những
+/// trường đã đổi. Người duyệt lại cần biết lần trước họ duyệt cái gì và giờ
+/// khác ở chỗ nào.
+model PurchaseOrderRevision {
+  id              String              @id @default(uuid())
+  purchaseOrderId String
+  version         Int
+  changedById     String
+  /// Mảng { field, label, before, after } dựng sẵn ở server.
+  changes         Json
+  note            String?             @db.Text
+  /// Trạng thái của đơn ngay trước khi sửa, để biết có phải duyệt lại không.
+  previousStatus  PurchaseOrderStatus
+  createdAt       DateTime            @default(now())
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  changedBy     User          @relation(fields: [changedById], references: [id])
+
+  @@unique([purchaseOrderId, version])
+  @@index([purchaseOrderId])
+  @@map("purchase_order_revisions")
 }
 
 model PurchaseOrderItem {
@@ -807,15 +940,95 @@ model PurchaseOrderItem {
 
   purchaseRequestItemId String?
   quotationItemId       String?
+  materialId            String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  material      Material?     @relation(fields: [materialId], references: [id])
 
   @@unique([purchaseOrderId, lineNo])
   @@index([purchaseOrderId])
+  @@index([materialId])
   @@map("purchase_order_items")
+}
+
+// ---------------------------------------------------------------------------
+// Material master data
+// ---------------------------------------------------------------------------
+
+/// Mã vật tư dùng chung cho yêu cầu mua hàng, báo giá và đơn hàng. Mã do người
+/// dùng đề xuất và admin duyệt, nên bản ghi chỉ ACTIVE sau khi được chấp thuận.
+model Material {
+  id            String         @id @default(uuid())
+  code          String         @unique
+  name          String
+  nameEn        String?
+  description   String?        @db.Text
+  specification String?        @db.Text
+  unit          String
+  categoryId    String?
+  manufacturer  String?
+  brand         String?
+  model         String?
+  hsCode        String?
+  /// Giá tham chiếu để ước tính, không phải giá chốt.
+  standardPrice Decimal?       @db.Decimal(18, 2)
+  currency      String         @default("VND")
+  minStock      Decimal?       @db.Decimal(18, 3)
+  status        MaterialStatus @default(PENDING)
+  isActive      Boolean        @default(true)
+
+  createdById  String?
+  approvedById String?
+  approvedAt   DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  category   Category? @relation(fields: [categoryId], references: [id])
+  createdBy  User?     @relation("MaterialCreatedBy", fields: [createdById], references: [id])
+  approvedBy User?     @relation("MaterialApprovedBy", fields: [approvedById], references: [id])
+
+  changeRequests       MaterialChangeRequest[]
+  purchaseRequestItems PurchaseRequestItem[]
+  quotationItems       QuotationItem[]
+  purchaseOrderItems   PurchaseOrderItem[]
+
+  @@index([status])
+  @@index([categoryId])
+  @@map("materials")
+}
+
+/// Mọi thay đổi lên danh mục đi qua đây, kể cả xoá: mã đã nằm trong đơn hàng
+/// không được biến mất mà không ai rà soát. `payload` giữ giá trị đề xuất, còn
+/// `snapshot` giữ giá trị trước khi đổi để đối chiếu và truy vết.
+model MaterialChangeRequest {
+  id         String               @id @default(uuid())
+  materialId String?
+  type       MaterialChangeType
+  status     MaterialChangeStatus @default(PENDING)
+  payload    Json?
+  snapshot   Json?
+  reason     String?              @db.Text
+
+  requestedById String
+  reviewedById  String?
+  reviewedAt    DateTime?
+  reviewNote    String?   @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  material    Material? @relation(fields: [materialId], references: [id])
+  requestedBy User      @relation("MaterialChangeRequestedBy", fields: [requestedById], references: [id])
+  reviewedBy  User?     @relation("MaterialChangeReviewedBy", fields: [reviewedById], references: [id])
+
+  @@index([status])
+  @@index([materialId])
+  @@map("material_change_requests")
 }
 
 // ---------------------------------------------------------------------------
@@ -941,6 +1154,9 @@ model Attachment {
   @@index([entityType])
   @@index([purchaseRequestId])
   @@index([supplierId])
+  @@index([contractId])
+  @@index([certificateId])
+  @@index([purchaseOrderId])
   @@map("attachments")
 }
 
@@ -960,9 +1176,27 @@ model Comment {
   author          User             @relation(fields: [authorId], references: [id])
   purchaseRequest PurchaseRequest? @relation(fields: [purchaseRequestId], references: [id], onDelete: Cascade)
   rfq             Rfq?             @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  mentions        CommentMention[]
 
   @@index([purchaseRequestId])
   @@map("comments")
+}
+
+/// Người được nhắc tên trong một bình luận. Lưu thành bảng riêng thay vì dò lại
+/// từ nội dung, vì tên người dùng có thể đổi và dò chuỗi thì không chắc chắn.
+model CommentMention {
+  id        String    @id @default(uuid())
+  commentId String
+  userId    String
+  createdAt DateTime  @default(now())
+  readAt    DateTime?
+
+  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([commentId, userId])
+  @@index([userId, readAt])
+  @@map("comment_mentions")
 }
 
 model Notification {

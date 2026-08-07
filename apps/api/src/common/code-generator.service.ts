@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
-type Sequence = 'PR' | 'RFQ' | 'QT' | 'PO' | 'SUP';
+type Sequence = 'PR' | 'RFQ' | 'QT' | 'PO' | 'SUP' | 'MAT';
 
 /**
  * Human readable business codes, e.g. PR-2026-00001. The counter is derived

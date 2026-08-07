@@ -11,6 +11,24 @@ services:
       - '${POSTGRES_PORT:-5432}:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    # /dev/shm mặc định của Docker chỉ 64MB. Truy vấn song song của PostgreSQL
+    # dùng bộ nhớ chia sẻ cho từng worker; ở bảng cỡ triệu dòng nó tràn và báo
+    # "could not resize shared memory segment", khiến câu lệnh chậm bất thường
+    # hoặc hỏng giữa chừng.
+    shm_size: 1gb
+    command:
+      - postgres
+      # 128MB mặc định là cho máy nhỏ. Với dữ liệu vài GB, phần lớn thời gian
+      # trôi vào việc đọc lại đĩa những trang vừa đọc xong.
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - effective_cache_size=1536MB
+      # Sắp xếp và gom nhóm trên bảng lớn tràn ra đĩa với work_mem 4MB.
+      - -c
+      - work_mem=32MB
+      - -c
+      - maintenance_work_mem=256MB
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-pms}']
       interval: 10s

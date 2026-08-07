@@ -37,6 +37,16 @@ export class PurchaseRequestsController {
     return this.service.findAll(dto, user);
   }
 
+  @Get('status-counts')
+  @RequirePermissions(PERMISSIONS.PR_READ)
+  @ApiOperation({ summary: 'Số lượng yêu cầu theo từng trạng thái' })
+  statusCounts(
+    @Query() dto: QueryPurchaseRequestDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.statusCounts(dto, user);
+  }
+
   @Get('pending-approval')
   @RequirePermissions(PERMISSIONS.PR_REVIEW)
   @ApiOperation({ summary: 'Yêu cầu đang chờ chính bạn duyệt' })

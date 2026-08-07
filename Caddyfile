@@ -1,0 +1,31 @@
+# Caddy tự xin và tự gia hạn chứng chỉ HTTPS của Let's Encrypt. Điều kiện: hai
+# tên miền dưới đây đã trỏ A về đúng IP máy chủ này, và cổng 80/443 mở.
+
+pmsystem.io.vn, www.pmsystem.io.vn {
+	encode zstd gzip
+	reverse_proxy web:3000
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+}
+
+api.pmsystem.io.vn {
+	encode zstd gzip
+	reverse_proxy api:4000
+
+	# File đính kèm và PDF đơn hàng có thể lớn; mặc định của Caddy đủ dùng
+	# nhưng đặt rõ để không phụ thuộc phiên bản.
+	request_body {
+		max_size 25MB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		-Server
+	}
+}

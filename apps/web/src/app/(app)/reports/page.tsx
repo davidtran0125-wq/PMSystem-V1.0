@@ -151,7 +151,7 @@ export default function ReportsPage() {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="border-y border-border bg-muted/50 text-left">
+              <thead className="border-y border-border bg-muted/40 text-left">
                 <tr>
                   {table.data.columns.map((c) => (
                     <th

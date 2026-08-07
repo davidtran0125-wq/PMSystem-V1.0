@@ -1,8 +1,17 @@
-import { Body, Controller, Get, ParseIntPipe, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  ParseIntPipe,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PerformanceService } from './performance.service';
-import { CreatePerformanceDto } from './dto/performance.dto';
-import { PaginationDto } from '../../common/dto/pagination.dto';
+import {
+  CreatePerformanceDto,
+  QueryPerformanceDto,
+} from './dto/performance.dto';
 import { CurrentUser, RequirePermissions } from '../../common/decorators';
 import { PERMISSIONS } from '../../common/permissions';
 
@@ -15,14 +24,16 @@ export class PerformanceController {
   @Get()
   @RequirePermissions(PERMISSIONS.SUPPLIER_READ)
   @ApiOperation({ summary: 'Lịch sử đánh giá nhà cung cấp' })
-  findAll(@Query() dto: PaginationDto, @Query('supplierId') supplierId?: string) {
-    return this.service.findAll(dto, supplierId);
+  findAll(@Query() dto: QueryPerformanceDto) {
+    return this.service.findAll(dto, dto.supplierId);
   }
 
   @Get('ranking')
   @RequirePermissions(PERMISSIONS.SUPPLIER_READ)
   @ApiOperation({ summary: 'Xếp hạng nhà cung cấp theo điểm trung bình' })
-  ranking(@Query('limit', new ParseIntPipe({ optional: true })) limit?: number) {
+  ranking(
+    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
+  ) {
     return this.service.ranking(limit ?? 20);
   }
 

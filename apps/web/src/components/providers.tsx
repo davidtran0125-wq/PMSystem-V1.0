@@ -13,6 +13,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
         defaultOptions: {
           queries: {
             staleTime: 30_000,
+            // Dữ liệu đã tải vẫn dùng lại khi quay lại trang cũ, chỉ nạp mới
+            // ở nền — không còn khoảng trắng chờ tải giữa các lần chuyển trang.
+            placeholderData: (previous: unknown) => previous,
             refetchOnWindowFocus: false,
             // Auth and permission failures are terminal; only retry transport
             // and server errors.

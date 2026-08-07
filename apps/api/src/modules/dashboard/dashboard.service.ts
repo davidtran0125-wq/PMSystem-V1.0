@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import {
   CertificateStatus,
   ContractStatus,
+  PurchaseOrderStatus,
   PurchaseRequestStatus,
   QuotationStatus,
   RfqStatus,
@@ -179,6 +180,116 @@ export class DashboardService {
    * Saving is the gap between the lowest quote received and the awarded quote's
    * peers: we credit the difference between the highest and the awarded price.
    */
+  /**
+   * Chênh lệch giữa giá trị dự kiến ghi trên yêu cầu mua và giá trị thật đã
+   * chốt trên đơn hàng. Một yêu cầu có thể sinh nhiều đơn (chia thầu), nên phải
+   * cộng dồn các đơn về từng yêu cầu rồi mới so, không so từng đơn một.
+   */
+  async requestToOrderSavings(months = 12) {
+    const since = new Date();
+    since.setMonth(since.getMonth() - months);
+
+    const orders = await this.prisma.purchaseOrder.findMany({
+      where: {
+        deletedAt: null,
+        status: { not: PurchaseOrderStatus.CANCELLED },
+        createdAt: { gte: since },
+      },
+      select: {
+        purchaseRequestId: true,
+        subtotal: true,
+        createdAt: true,
+        issuedAt: true,
+        purchaseRequest: {
+          select: { id: true, code: true, title: true, estimatedTotal: true },
+        },
+      },
+    });
+
+    const byRequest = new Map<
+      string,
+      {
+        code: string;
+        title: string;
+        estimated: number;
+        actual: number;
+        at: Date;
+      }
+    >();
+
+    for (const order of orders) {
+      const pr = order.purchaseRequest;
+      if (!pr?.estimatedTotal) continue;
+      const at = order.issuedAt ?? order.createdAt;
+      const entry = byRequest.get(pr.id);
+      if (entry) {
+        entry.actual += Number(order.subtotal);
+        if (at > entry.at) entry.at = at;
+      } else {
+        byRequest.set(pr.id, {
+          code: pr.code,
+          title: pr.title,
+          estimated: Number(pr.estimatedTotal),
+          actual: Number(order.subtotal),
+          at,
+        });
+      }
+    }
+
+    const rows = [...byRequest.entries()].map(([id, r]) => ({
+      purchaseRequestId: id,
+      code: r.code,
+      title: r.title,
+      estimated: r.estimated,
+      actual: Number(r.actual.toFixed(2)),
+      saved: Number((r.estimated - r.actual).toFixed(2)),
+      savedPercent:
+        r.estimated > 0
+          ? Number((((r.estimated - r.actual) / r.estimated) * 100).toFixed(2))
+          : 0,
+      at: r.at,
+    }));
+
+    const estimated = rows.reduce((sum, r) => sum + r.estimated, 0);
+    const actual = rows.reduce((sum, r) => sum + r.actual, 0);
+
+    const byMonth = new Map<string, { estimated: number; actual: number }>();
+    for (const r of rows) {
+      const key = r.at.toISOString().slice(0, 7);
+      const bucket = byMonth.get(key) ?? { estimated: 0, actual: 0 };
+      bucket.estimated += r.estimated;
+      bucket.actual += r.actual;
+      byMonth.set(key, bucket);
+    }
+
+    return {
+      summary: {
+        requests: rows.length,
+        estimated: Number(estimated.toFixed(2)),
+        actual: Number(actual.toFixed(2)),
+        saved: Number((estimated - actual).toFixed(2)),
+        savedPercent:
+          estimated > 0
+            ? Number((((estimated - actual) / estimated) * 100).toFixed(2))
+            : 0,
+      },
+      byMonth: [...byMonth.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([month, v]) => ({
+          month,
+          estimated: Number(v.estimated.toFixed(2)),
+          actual: Number(v.actual.toFixed(2)),
+          saved: Number((v.estimated - v.actual).toFixed(2)),
+        })),
+      // Chênh lệch lớn nhất trước, cả tiết kiệm lẫn vượt dự toán.
+      topSaved: [...rows].sort((a, b) => b.saved - a.saved).slice(0, 5),
+      topOverrun: [...rows]
+        .filter((r) => r.saved < 0)
+        .sort((a, b) => a.saved - b.saved)
+        .slice(0, 5),
+    };
+  }
+
   async savings(months = 12) {
     const since = new Date();
     since.setMonth(since.getMonth() - months);
@@ -193,10 +304,10 @@ export class DashboardService {
         id: true,
         code: true,
         awardedAt: true,
-        awardedQuotationId: true,
+
         quotations: {
           where: { deletedAt: null, status: { not: QuotationStatus.DRAFT } },
-          select: { id: true, totalAmount: true },
+          select: { id: true, totalAmount: true, status: true },
         },
       },
     });
@@ -206,10 +317,15 @@ export class DashboardService {
     for (const rfq of rfqs) {
       if (rfq.quotations.length < 2 || !rfq.awardedAt) continue;
 
-      const awarded = rfq.quotations.find(
-        (q) => q.id === rfq.awardedQuotationId,
+      // Nhiều nhà cung cấp có thể cùng trúng thầu, cộng dồn giá trị đã chốt.
+      const awarded = rfq.quotations.filter(
+        (q) => q.status === QuotationStatus.AWARDED,
       );
-      if (!awarded) continue;
+      if (!awarded.length) continue;
+      const awardedTotal = awarded.reduce(
+        (sum, q) => sum + Number(q.totalAmount),
+        0,
+      );
 
       const amounts = rfq.quotations.map((q) => Number(q.totalAmount));
       const baseline = Math.max(...amounts);
@@ -218,7 +334,7 @@ export class DashboardService {
       const entry = byMonth.get(key) ?? { baseline: 0, awarded: 0 };
       byMonth.set(key, {
         baseline: entry.baseline + baseline,
-        awarded: entry.awarded + Number(awarded.totalAmount),
+        awarded: entry.awarded + awardedTotal,
       });
     }
 
@@ -284,43 +400,43 @@ export class DashboardService {
   }
 
   /** Median and average hours from submission to a buyer decision. */
+  /**
+   * Thời gian từ lúc gửi tới lúc có quyết định.
+   *
+   * Tính hẳn trong SQL. Bản trước kéo mọi yêu cầu đã quyết định về Node rồi
+   * sắp xếp bằng JavaScript để lấy trung vị — với một triệu yêu cầu là hơn ba
+   * trăm nghìn dòng đi qua mạng cho ra đúng ba con số, mất khoảng 1,6 giây.
+   */
   async slaMetrics() {
-    const decided = await this.prisma.purchaseRequest.findMany({
-      where: {
-        deletedAt: null,
-        submittedAt: { not: null },
-        status: {
-          in: [PurchaseRequestStatus.APPROVED, PurchaseRequestStatus.REJECTED],
-        },
-      },
-      select: { submittedAt: true, approvedAt: true, rejectedAt: true },
-    });
+    const [row] = await this.prisma.$queryRaw<
+      {
+        decided: bigint;
+        average_hours: number | null;
+        median_hours: number | null;
+      }[]
+    >`
+      SELECT
+        count(*)                                                        AS decided,
+        avg(hours)                                                      AS average_hours,
+        percentile_cont(0.5) WITHIN GROUP (ORDER BY hours)              AS median_hours
+      FROM (
+        SELECT EXTRACT(EPOCH FROM (COALESCE("approvedAt", "rejectedAt") - "submittedAt")) / 3600 AS hours
+        FROM purchase_requests
+        WHERE "deletedAt" IS NULL
+          AND "submittedAt" IS NOT NULL
+          AND COALESCE("approvedAt", "rejectedAt") IS NOT NULL
+          AND status IN ('APPROVED', 'REJECTED')
+      ) t
+    `;
 
-    const hours = decided
-      .map((r) => {
-        const end = r.approvedAt ?? r.rejectedAt;
-        if (!r.submittedAt || !end) return null;
-        return (end.getTime() - r.submittedAt.getTime()) / 3_600_000;
-      })
-      .filter((h): h is number => h !== null)
-      .sort((a, b) => a - b);
+    const decided = Number(row?.decided ?? 0);
+    if (!decided) return { decided: 0, averageHours: 0, medianHours: 0 };
 
-    if (!hours.length) {
-      return { decided: 0, averageHours: 0, medianHours: 0 };
-    }
-
-    const mid = Math.floor(hours.length / 2);
+    const round = (v: number | null) => Number(Number(v ?? 0).toFixed(2));
     return {
-      decided: hours.length,
-      averageHours: Number(
-        (hours.reduce((s, h) => s + h, 0) / hours.length).toFixed(2),
-      ),
-      medianHours: Number(
-        (hours.length % 2
-          ? hours[mid]
-          : (hours[mid - 1] + hours[mid]) / 2
-        ).toFixed(2),
-      ),
+      decided,
+      averageHours: round(row.average_hours),
+      medianHours: round(row.median_hours),
     };
   }
 }

@@ -61,6 +61,7 @@ export interface Department {
 
 export interface Category {
   id: string;
+  requiresMaterial?: boolean;
   name: string;
   nameEn: string | null;
   code: string;
@@ -93,8 +94,19 @@ export interface DynamicForm {
   fields: DynamicField[];
 }
 
+export interface FormVersion {
+  id: string;
+  name: string;
+  version: number;
+  isActive: boolean;
+  fieldCount: number;
+  createdAt: string;
+}
+
 export interface PurchaseRequestItem {
   id: string;
+  materialId?: string | null;
+  material?: { id: string; code: string; name: string; unit: string } | null;
   lineNo: number;
   name: string;
   description: string | null;
@@ -164,6 +176,8 @@ export interface Supplier {
   status: SupplierStatus;
   ratingAvg: string | null;
   rejectReason: string | null;
+  createdAt?: string;
+  certificates?: Certificate[];
   categories?: { categoryId: string; category: Category }[];
   _count?: { quotations: number; contracts: number };
 }
@@ -171,6 +185,9 @@ export interface Supplier {
 export interface QuotationItem {
   id: string;
   lineNo: number;
+  purchaseRequestItemId?: string | null;
+  materialId?: string | null;
+  isAwarded?: boolean;
   name: string;
   description: string | null;
   quantity: string;
@@ -187,7 +204,6 @@ export interface Rfq {
   instructions: string | null;
   dueDate: string | null;
   sentAt: string | null;
-  awardedQuotationId: string | null;
   createdAt: string;
   buyer?: UserRef;
   purchaseRequest: Pick<PurchaseRequest, 'id' | 'code' | 'title'> & {
@@ -195,6 +211,10 @@ export interface Rfq {
   };
   suppliers?: { id: string; supplierId: string; status: string; supplier: Supplier }[];
   quotations?: Quotation[];
+  /** Chỉ có ở khung nhìn của nhà cung cấp: số đối thủ, không kèm tên. */
+  competitorCount?: number;
+  /** Kết quả thầu của chính nhà cung cấp đang đăng nhập. */
+  myResult?: 'WON' | 'LOST' | 'NO_QUOTE' | null;
   _count?: { suppliers: number; quotations: number };
 }
 
@@ -214,6 +234,7 @@ export interface Quotation {
   deliveryTerm: string | null;
   remark: string | null;
   submittedAt: string | null;
+  awardedAt: string | null;
   supplier?: Supplier;
   items: QuotationItem[];
   rfq?: Pick<Rfq, 'id' | 'code' | 'title' | 'status'>;
@@ -226,6 +247,8 @@ export interface ComparisonRow {
   status: QuotationStatus;
   currency: string;
   totalAmount: string;
+  isAwarded: boolean;
+  awardedItemIds: string[];
   isLowestPrice: boolean;
   diffFromLowestPercent: number;
   leadTimeDays: number | null;
@@ -243,13 +266,16 @@ export interface ComparisonRow {
 }
 
 export interface Comparison {
+  /** Còn niêm phong thì mọi trường giá đều vắng mặt. */
+  sealed?: boolean;
+  seal?: { pendingSuppliers: number; message: string };
   rfq: {
     id: string;
     code: string;
     title: string;
     status: RfqStatus;
     dueDate: string | null;
-    awardedQuotationId: string | null;
+    awardedQuotationIds: string[];
     purchaseRequest: { id: string; code: string; title: string; items: PurchaseRequestItem[] };
   };
   summary: {
@@ -259,6 +285,18 @@ export interface Comparison {
     shortestLeadTime: number | null;
   };
   quotations: ComparisonRow[];
+}
+
+/** Dòng rút gọn khi giá còn niêm phong: biết ai đã nộp, không biết nộp bao nhiêu. */
+export interface SealedQuotationRow {
+  quotationId: string;
+  code: string;
+  supplier: { id: string; code: string; companyName: string; ratingAvg: string | null };
+  status: QuotationStatus;
+  currency: string;
+  submittedAt: string | null;
+  itemCount: number;
+  attachmentCount: number;
 }
 
 export interface Notification {
@@ -272,12 +310,21 @@ export interface Notification {
   createdAt: string;
 }
 
+export interface MentionableUser {
+  id: string;
+  fullName: string;
+  email: string;
+  jobTitle?: string | null;
+  department?: { name: string } | null;
+}
+
 export interface Comment {
   id: string;
   body: string;
   isInternal: boolean;
   createdAt: string;
   author: UserRef;
+  mentions?: { id: string; user: UserRef }[];
 }
 
 export interface AuthProfile {
@@ -319,6 +366,23 @@ export interface PurchaseOrderItem {
   receivedQty: string;
 }
 
+export interface OrderApprovalStep {
+  id: string;
+  stepOrder: number;
+  name: string;
+  role?: { id: string; code: string; name: string } | null;
+}
+
+export interface OrderRevision {
+  id: string;
+  version: number;
+  previousStatus: PurchaseOrderStatus;
+  note: string | null;
+  createdAt: string;
+  changedBy: UserRef;
+  changes: { field: string; label: string; before: string; after: string }[];
+}
+
 export interface PurchaseOrder {
   id: string;
   code: string;
@@ -342,6 +406,20 @@ export interface PurchaseOrder {
   cancelledAt: string | null;
   cancelReason: string | null;
   createdAt: string;
+  submittedForApprovalAt?: string | null;
+  approvedAt?: string | null;
+  currentStep?: OrderApprovalStep | null;
+  approvalWorkflow?: { id: string; name: string; steps: OrderApprovalStep[] } | null;
+  approvalHistories?: {
+    id: string;
+    decision: string;
+    comment: string | null;
+    fromStatus: string | null;
+    toStatus: string | null;
+    createdAt: string;
+    actor: UserRef;
+    step?: { id: string; name: string; stepOrder: number } | null;
+  }[];
   supplierId: string;
   supplier: Supplier;
   buyer: UserRef;
@@ -424,30 +502,20 @@ export interface SupplierPerformance {
   id: string;
   periodStart: string;
   periodEnd: string;
-  priceScore: number;
-  qualityScore: number;
-  deliveryScore: number;
-  responseScore: number;
-  cooperationScore: number;
   complaintRate: string;
   totalScore: string;
   note: string | null;
   createdAt: string;
   supplier: { id: string; code: string; companyName: string };
   evaluator: UserRef;
+  scores: PerformanceScore[];
 }
 
 export interface SupplierRanking {
   supplier: { id: string; code: string; companyName: string; status: string } | null;
   evaluations: number;
   averageScore: number;
-  breakdown: {
-    price: number;
-    quality: number;
-    delivery: number;
-    response: number;
-    cooperation: number;
-  };
+  breakdown: { criteriaId: string; name: string; average: number; maxScore: number }[];
 }
 
 export interface ReportTable {
@@ -539,3 +607,256 @@ export interface QuotationExtraction {
   confidence: number;
   warnings: string[];
 }
+
+// ---------------------------------------------------------------------------
+// Tài liệu đính kèm, tiêu chí đánh giá, thiết lập hệ thống
+// ---------------------------------------------------------------------------
+
+export type AttachmentTarget =
+  | 'CONTRACT'
+  | 'CERTIFICATE'
+  | 'PURCHASE_REQUEST'
+  | 'PURCHASE_ORDER'
+  | 'SUPPLIER'
+  | 'RFQ'
+  | 'QUOTATION';
+
+export interface Attachment {
+  id: string;
+  originalName: string;
+  mimeType: string;
+  size: number;
+  documentType: string | null;
+  version: number;
+  parentId: string | null;
+  createdAt: string;
+  uploadedBy: UserRef | null;
+}
+
+export interface EvaluationCriteria {
+  id: string;
+  name: string;
+  description: string | null;
+  weight: string;
+  maxScore: number;
+  sortOrder: number;
+  isActive: boolean;
+  isSystem: boolean;
+}
+
+export interface CriteriaSummary {
+  criteria: EvaluationCriteria[];
+  totalWeight: number;
+  balanced: boolean;
+}
+
+export interface PerformanceScore {
+  id: string;
+  criteriaId: string;
+  score: number;
+  comment: string | null;
+  criteria: Pick<EvaluationCriteria, 'id' | 'name' | 'weight' | 'maxScore'>;
+}
+
+export interface CompanyProfile {
+  name: string;
+  taxCode: string;
+  address: string;
+  phone: string;
+  email: string;
+  website: string;
+  representative: string;
+  representativeTitle: string;
+  bankAccount: string;
+  bankName: string;
+  poFooterNote: string;
+}
+
+// ---------------------------------------------------------------------------
+// Danh mục vật tư
+// ---------------------------------------------------------------------------
+
+export type MaterialStatus = 'PENDING' | 'ACTIVE' | 'INACTIVE';
+export type MaterialChangeType = 'CREATE' | 'UPDATE' | 'DELETE';
+export type MaterialChangeStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+
+export interface Material {
+  id: string;
+  code: string;
+  name: string;
+  nameEn: string | null;
+  description: string | null;
+  specification: string | null;
+  unit: string;
+  categoryId: string | null;
+  manufacturer: string | null;
+  brand: string | null;
+  model: string | null;
+  hsCode: string | null;
+  standardPrice: string | null;
+  currency: string;
+  minStock: string | null;
+  status: MaterialStatus;
+  createdAt: string;
+  approvedAt: string | null;
+  category: { id: string; name: string; nameEn: string | null } | null;
+  createdBy: UserRef | null;
+  approvedBy: UserRef | null;
+  changeRequests?: MaterialChangeRequest[];
+}
+
+export interface MaterialChangeRequest {
+  id: string;
+  materialId: string | null;
+  type: MaterialChangeType;
+  status: MaterialChangeStatus;
+  payload: Record<string, string | number | null> | null;
+  snapshot: Record<string, string | number | null> | null;
+  reason: string | null;
+  reviewNote: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+  material: { id: string; code: string; name: string; status: MaterialStatus } | null;
+  requestedBy: UserRef & { email: string };
+  reviewedBy: UserRef | null;
+}
+
+export interface MaterialOrderHistory {
+  material: {
+    id: string;
+    code: string;
+    name: string;
+    unit: string;
+    standardPrice: string | null;
+    currency: string;
+  };
+  summary: {
+    orders: number;
+    totalQuantity: number;
+    totalValue: number;
+    averagePrice: number | null;
+    lowestPrice: number | null;
+    highestPrice: number | null;
+    lastOrderedAt: string | null;
+    suppliers: number;
+  };
+  orders: {
+    id: string;
+    purchaseOrder: {
+      id: string;
+      code: string;
+      status: PurchaseOrderStatus;
+      currency: string;
+      supplier: { id: string; code: string; companyName: string };
+    };
+    quantity: string;
+    unit: string;
+    unitPrice: string;
+    lineTotal: string;
+    receivedQty: string;
+    orderedAt: string;
+  }[];
+  bySupplier: {
+    supplier: { id: string; code: string; companyName: string };
+    orders: number;
+    quantity: number;
+    value: number;
+    lastPrice: number;
+    lastOrderedAt: string;
+  }[];
+  requests: {
+    id: string;
+    purchaseRequest: {
+      id: string;
+      code: string;
+      title: string;
+      status: PurchaseRequestStatus;
+      createdAt: string;
+      requester: UserRef;
+    };
+    quantity: string;
+    unit: string;
+    estimatedPrice: string | null;
+  }[];
+}
+
+// ---------------------------------------------------------------------------
+// Tài khoản người dùng
+// ---------------------------------------------------------------------------
+
+export interface Role {
+  id: string;
+  code: string;
+  name: string;
+  description?: string | null;
+}
+
+export type UserStatus = 'PENDING' | 'ACTIVE' | 'SUSPENDED';
+
+export interface UserAccount {
+  id: string;
+  email: string;
+  fullName: string;
+  phone: string | null;
+  jobTitle: string | null;
+  locale: string | null;
+  status: UserStatus;
+  lastLoginAt: string | null;
+  createdAt: string;
+  department: { id: string; name: string; code: string } | null;
+  supplier: { id: string; companyName: string } | null;
+  roles: { role: Role }[];
+}
+
+export interface MaterialPriceSummary {
+  orders: number;
+  lowestPrice: number | null;
+  highestPrice: number | null;
+  averagePrice: number | null;
+  lastPrice: number | null;
+  lastOrderedAt: string | null;
+  lastSupplier: string | null;
+  lastPurchaseOrder: { id: string; code: string } | null;
+}
+
+export type ApprovalTarget = 'PURCHASE_REQUEST' | 'PURCHASE_ORDER';
+
+export interface ApprovalWorkflowStep {
+  id: string;
+  stepOrder: number;
+  name: string;
+  roleId: string | null;
+  slaHours: number | null;
+  isMandatory: boolean;
+  role?: { id: string; code: string; name: string } | null;
+}
+
+export interface ApprovalWorkflow {
+  id: string;
+  name: string;
+  description: string | null;
+  appliesTo: ApprovalTarget;
+  categoryId: string | null;
+  departmentId: string | null;
+  minAmount: string | null;
+  maxAmount: string | null;
+  priority: number;
+  isActive: boolean;
+  steps: ApprovalWorkflowStep[];
+}
+
+export type RoutingPreview =
+  | { matched: false }
+  | {
+      matched: true;
+      workflowId: string;
+      name: string;
+      steps: {
+        id: string;
+        stepOrder: number;
+        name: string;
+        roleId: string | null;
+        roleName: string | null;
+        slaHours: number | null;
+      }[];
+    };

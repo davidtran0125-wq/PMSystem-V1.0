@@ -1,0 +1,94 @@
+# Triển khai thật cho pmsystem.io.vn.
+#
+#   cp .env.production.example .env.production
+#   nano .env.production                       # điền khóa bí mật thật
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+#
+# Lần đầu tiên, sau khi các container đã chạy:
+#   docker compose -f docker-compose.prod.yml --env-file .env.production exec api npx prisma db seed
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Không mở cổng ra ngoài. Chỉ các container cùng mạng mới nối được.
+    shm_size: 1gb
+    command:
+      - postgres
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - effective_cache_size=1536MB
+      - -c
+      - work_mem=32MB
+      - -c
+      - maintenance_work_mem=256MB
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./apps/api
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      CORS_ORIGIN: https://pmsystem.io.vn,https://www.pmsystem.io.vn
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    volumes:
+      # File đính kèm phải sống ngoài container, nếu không mỗi lần deploy lại là mất.
+      - storage:/app/storage
+
+  web:
+    build:
+      context: ./apps/web
+      args:
+        # Trình duyệt của người dùng gọi thẳng địa chỉ này, nên nó phải là tên
+        # miền công khai chứ không phải tên service nội bộ.
+        NEXT_PUBLIC_API_URL: https://api.pmsystem.io.vn/api
+    restart: unless-stopped
+    depends_on: [api]
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    depends_on: [web, api]
+
+volumes:
+  pgdata:
+  redisdata:
+  storage:
+  caddydata:
+  caddyconfig:

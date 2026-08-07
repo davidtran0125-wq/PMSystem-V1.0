@@ -22,6 +22,13 @@ import {
 } from '../../../common/dto/pagination.dto';
 
 export class PurchaseRequestItemDto {
+  @ApiPropertyOptional({
+    description: 'Mã vật tư trong danh mục. Bỏ trống nếu là hàng chưa có mã.',
+  })
+  @IsOptional()
+  @IsUUID()
+  materialId?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsInt()

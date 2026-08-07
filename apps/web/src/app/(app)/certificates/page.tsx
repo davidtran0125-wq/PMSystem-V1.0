@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search } from 'lucide-react';
+import { Paperclip, Plus, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   Button,
@@ -16,14 +16,22 @@ import {
   Input,
   Label,
   PageHeader,
+  Pagination,
   Select,
   Skeleton,
+  StatusFilterBar,
 } from '@/components/ui';
 import { CertificateStatusBadge, DaysRemaining } from '@/components/status-badge';
+import { Attachments } from '@/components/attachments';
 import { api, apiErrorMessage } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth';
-import type { Certificate, Paginated, Supplier } from '@/lib/types';
+import type {
+  Certificate,
+  CertificateStatus,
+  Paginated,
+  Supplier,
+} from '@/lib/types';
 
 const COMMON_TYPES = [
   'ISO',
@@ -47,14 +55,25 @@ interface FormValues {
   expiryDate: string;
 }
 
+const CERTIFICATE_STATUSES: { value: CertificateStatus | ''; label: string }[] = [
+  { value: '', label: 'Tất cả trạng thái' },
+  { value: 'VALID', label: 'Còn hiệu lực' },
+  { value: 'EXPIRING', label: 'Sắp hết hạn' },
+  { value: 'EXPIRED', label: 'Đã hết hạn' },
+  { value: 'REVOKED', label: 'Đã thu hồi' },
+];
+
 export default function CertificatesPage() {
   const queryClient = useQueryClient();
   const canWrite = useAuthStore((s) => s.can('certificate:write'));
 
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [status, setStatus] = useState('');
   const [expiringOnly, setExpiringOnly] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [docsFor, setDocsFor] = useState<Certificate | null>(null);
 
   const {
     register,
@@ -63,13 +82,31 @@ export default function CertificatesPage() {
     formState: { errors, isSubmitting },
   } = useForm<FormValues>();
 
+  /** Đếm theo trạng thái, không phụ thuộc trạng thái đang chọn. */
+  const counts = useQuery({
+    queryKey: ['certificate-counts', { search, expiringOnly }],
+    queryFn: async () =>
+      (
+        await api.get<{ total: number; counts: Record<CertificateStatus, number> }>(
+          '/certificates/status-counts',
+          {
+            params: {
+              ...(search ? { search } : {}),
+              ...(expiringOnly ? { expiringOnly: true } : {}),
+            },
+          },
+        )
+      ).data,
+  });
+
   const { data, isLoading } = useQuery({
-    queryKey: ['certificates', { search, status, expiringOnly }],
+    queryKey: ['certificates', { search, status, expiringOnly, page, pageSize }],
     queryFn: async () =>
       (
         await api.get<Paginated<Certificate>>('/certificates', {
           params: {
-            pageSize: 50,
+                        page,
+            pageSize,
             ...(search ? { search } : {}),
             ...(status ? { status } : {}),
             ...(expiringOnly ? { expiringOnly: true } : {}),
@@ -80,6 +117,8 @@ export default function CertificatesPage() {
 
   const suppliers = useQuery({
     queryKey: ['suppliers', 'approved'],
+    // Danh mục tham chiếu gần như không đổi trong một phiên làm việc.
+    staleTime: 10 * 60_000,
     queryFn: async () =>
       (
         await api.get<Paginated<Supplier>>('/suppliers', {
@@ -208,19 +247,12 @@ export default function CertificatesPage() {
             className="pl-9"
             placeholder="Tìm theo tên hoặc loại chứng chỉ…"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
           />
         </div>
-        <Select
-          className="w-52"
-          value={status}
-          onChange={(e) => setStatus(e.target.value)}
-        >
-          <option value="">Tất cả trạng thái</option>
-          <option value="VALID">Còn hiệu lực</option>
-          <option value="EXPIRING">Sắp hết hạn</option>
-          <option value="EXPIRED">Đã hết hạn</option>
-        </Select>
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
@@ -231,6 +263,38 @@ export default function CertificatesPage() {
           Sắp hết hạn trong 90 ngày
         </label>
       </div>
+
+      <StatusFilterBar
+        options={CERTIFICATE_STATUSES}
+        value={status}
+        onChange={(v) => {
+          setStatus(v);
+          setPage(1);
+        }}
+        counts={counts.data?.counts}
+        total={counts.data?.total}
+        isLoading={counts.isLoading}
+      />
+
+      {docsFor ? (
+        <Card className="mb-4">
+          <CardHeader>
+            <CardTitle>
+              Tài liệu chứng chỉ {docsFor.name} — {docsFor.supplier.companyName}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Attachments
+              key={docsFor.id}
+              target="CERTIFICATE"
+              entityId={docsFor.id}
+              canWrite={canWrite}
+              documentTypes={['Bản gốc', 'Bản scan có dấu', 'Bản dịch', 'Kết quả kiểm định']}
+              emptyHint="Chưa đính kèm bản scan chứng chỉ."
+            />
+          </CardContent>
+        </Card>
+      ) : null}
 
       {isLoading ? (
         <div className="space-y-3">
@@ -247,15 +311,16 @@ export default function CertificatesPage() {
         <Card className="overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="border-b border-border bg-muted/50 text-left">
+              <thead className="border-y border-border bg-muted/40 text-left">
                 <tr>
-                  <th className="px-4 py-3 font-medium">Chứng chỉ</th>
-                  <th className="px-4 py-3 font-medium">Loại</th>
-                  <th className="px-4 py-3 font-medium">Nhà cung cấp</th>
-                  <th className="px-4 py-3 font-medium">Nơi cấp</th>
-                  <th className="px-4 py-3 font-medium">Hết hạn</th>
-                  <th className="px-4 py-3 font-medium">Còn lại</th>
-                  <th className="px-4 py-3 font-medium">Trạng thái</th>
+                  <th className="cell-head">Chứng chỉ</th>
+                  <th className="cell-head">Loại</th>
+                  <th className="cell-head">Nhà cung cấp</th>
+                  <th className="cell-head">Nơi cấp</th>
+                  <th className="cell-head">Hết hạn</th>
+                  <th className="cell-head">Còn lại</th>
+                  <th className="cell-head">Trạng thái</th>
+                  <th className="cell-head">Tài liệu</th>
                 </tr>
               </thead>
               <tbody>
@@ -264,30 +329,50 @@ export default function CertificatesPage() {
                     key={c.id}
                     className="border-b border-border last:border-0 hover:bg-accent/50"
                   >
-                    <td className="px-4 py-3 font-medium">{c.name}</td>
-                    <td className="px-4 py-3 text-muted-foreground">
+                    <td className="cell font-medium">{c.name}</td>
+                    <td className="cell text-muted-foreground">
                       {c.type ?? '—'}
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground">
+                    <td className="cell text-muted-foreground">
                       {c.supplier.companyName}
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground">
+                    <td className="cell text-muted-foreground">
                       {c.issuedBy ?? '—'}
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground">
+                    <td className="cell text-muted-foreground">
                       {formatDate(c.expiryDate)}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="cell">
                       <DaysRemaining days={c.daysRemaining} />
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="cell">
                       <CertificateStatusBadge status={c.status} />
+                    </td>
+                    <td className="cell">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setDocsFor((v) => (v?.id === c.id ? null : c))}
+                      >
+                        <Paperclip className="h-4 w-4" />
+                        {docsFor?.id === c.id ? 'Đóng' : 'Tài liệu'}
+                      </Button>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+          <Pagination
+            page={page}
+            pageSize={pageSize}
+            total={data.meta.total}
+            onPageChange={setPage}
+            onPageSizeChange={(n) => {
+              setPageSize(n);
+              setPage(1);
+            }}
+          />
         </Card>
       )}
     </div>

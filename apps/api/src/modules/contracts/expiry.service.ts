@@ -111,7 +111,11 @@ export class ExpiryService {
         if (reminder.contract) {
           const c = reminder.contract;
           await this.notifications.notify({
-            userIds: [...new Set([...recipients, c.buyerId].filter(Boolean) as string[])],
+            userIds: [
+              ...new Set(
+                [...recipients, c.buyerId].filter(Boolean) as string[],
+              ),
+            ],
             event: NotificationEvent.CONTRACT_EXPIRY,
             title: `Hợp đồng ${c.contractNumber} còn ${reminder.daysBefore} ngày là hết hạn`,
             body: `"${c.title}" với ${c.supplier.companyName} hết hạn ngày ${c.endDate.toLocaleDateString('vi-VN')}.`,

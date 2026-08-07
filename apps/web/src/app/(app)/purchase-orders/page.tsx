@@ -11,19 +11,27 @@ import {
   EmptyState,
   Input,
   PageHeader,
-  Select,
+  Pagination,
+  StatusFilterBar,
   Skeleton,
 } from '@/components/ui';
 import { PoStatusBadge } from '@/components/status-badge';
 import { api } from '@/lib/api';
 import { formatCurrency, formatDate } from '@/lib/utils';
-import type { Paginated, PurchaseOrder } from '@/lib/types';
+import type {
+  Paginated,
+  PurchaseOrder,
+  PurchaseOrderStatus,
+} from '@/lib/types';
 
-const STATUSES = [
+const STATUSES: { value: PurchaseOrderStatus | ''; label: string }[] = [
   { value: '', label: 'Tất cả trạng thái' },
   { value: 'DRAFT', label: 'Nháp' },
+  { value: 'PENDING_APPROVAL', label: 'Chờ duyệt' },
+  { value: 'APPROVED', label: 'Đã duyệt' },
   { value: 'ISSUED', label: 'Đã phát hành' },
   { value: 'ACKNOWLEDGED', label: 'NCC đã xác nhận' },
+  { value: 'PARTIALLY_RECEIVED', label: 'Nhận một phần' },
   { value: 'COMPLETED', label: 'Hoàn tất' },
   { value: 'CANCELLED', label: 'Đã hủy' },
 ];
@@ -31,15 +39,30 @@ const STATUSES = [
 function PurchaseOrderList() {
   const params = useSearchParams();
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [status, setStatus] = useState(params.get('status') ?? '');
 
+  /** Đếm theo trạng thái, không phụ thuộc trạng thái đang chọn. */
+  const counts = useQuery({
+    queryKey: ['purchase-order-counts', { search }],
+    queryFn: async () =>
+      (
+        await api.get<{ total: number; counts: Record<PurchaseOrderStatus, number> }>(
+          '/purchase-orders/status-counts',
+          { params: { ...(search ? { search } : {}) } },
+        )
+      ).data,
+  });
+
   const { data, isLoading } = useQuery({
-    queryKey: ['purchase-orders', { search, status }],
+    queryKey: ['purchase-orders', { search, status, page, pageSize }],
     queryFn: async () =>
       (
         await api.get<Paginated<PurchaseOrder>>('/purchase-orders', {
           params: {
-            pageSize: 50,
+                        page,
+            pageSize,
             ...(search ? { search } : {}),
             ...(status ? { status } : {}),
           },
@@ -69,21 +92,25 @@ function PurchaseOrderList() {
             className="pl-9"
             placeholder="Tìm theo mã hoặc tiêu đề…"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
           />
         </div>
-        <Select
-          className="w-52"
-          value={status}
-          onChange={(e) => setStatus(e.target.value)}
-        >
-          {STATUSES.map((s) => (
-            <option key={s.value} value={s.value}>
-              {s.label}
-            </option>
-          ))}
-        </Select>
       </div>
+
+      <StatusFilterBar
+        options={STATUSES}
+        value={status}
+        onChange={(v) => {
+          setStatus(v);
+          setPage(1);
+        }}
+        counts={counts.data?.counts}
+        total={counts.data?.total}
+        isLoading={counts.isLoading}
+      />
 
       {isLoading ? (
         <div className="space-y-3">
@@ -100,15 +127,15 @@ function PurchaseOrderList() {
         <Card className="overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="border-b border-border bg-muted/50 text-left">
+              <thead className="border-y border-border bg-muted/40 text-left">
                 <tr>
-                  <th className="px-4 py-3 font-medium">Mã đơn</th>
-                  <th className="px-4 py-3 font-medium">Tiêu đề</th>
-                  <th className="px-4 py-3 font-medium">Nhà cung cấp</th>
-                  <th className="px-4 py-3 font-medium">Yêu cầu gốc</th>
-                  <th className="px-4 py-3 font-medium">Tổng tiền</th>
-                  <th className="px-4 py-3 font-medium">Ngày giao</th>
-                  <th className="px-4 py-3 font-medium">Trạng thái</th>
+                  <th className="cell-head">Mã đơn</th>
+                  <th className="cell-head">Tiêu đề</th>
+                  <th className="cell-head">Nhà cung cấp</th>
+                  <th className="cell-head">Yêu cầu gốc</th>
+                  <th className="cell-head">Tổng tiền</th>
+                  <th className="cell-head">Ngày giao</th>
+                  <th className="cell-head">Trạng thái</th>
                 </tr>
               </thead>
               <tbody>
@@ -117,7 +144,7 @@ function PurchaseOrderList() {
                     key={po.id}
                     className="border-b border-border last:border-0 hover:bg-accent/50"
                   >
-                    <td className="px-4 py-3">
+                    <td className="cell">
                       <Link
                         href={`/purchase-orders/${po.id}`}
                         className="font-medium text-primary hover:underline"
@@ -125,20 +152,20 @@ function PurchaseOrderList() {
                         {po.code}
                       </Link>
                     </td>
-                    <td className="max-w-56 truncate px-4 py-3">{po.title}</td>
-                    <td className="px-4 py-3 text-muted-foreground">
+                    <td className="max-w-56 truncate cell">{po.title}</td>
+                    <td className="cell text-muted-foreground">
                       {po.supplier?.companyName}
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground">
+                    <td className="cell text-muted-foreground">
                       {po.purchaseRequest?.code}
                     </td>
-                    <td className="px-4 py-3 font-medium tabular-nums">
+                    <td className="cell font-medium tabular-nums">
                       {formatCurrency(po.totalAmount, po.currency)}
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground">
+                    <td className="cell text-muted-foreground">
                       {formatDate(po.deliveryDate)}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="cell">
                       <PoStatusBadge status={po.status} />
                     </td>
                   </tr>
@@ -146,6 +173,16 @@ function PurchaseOrderList() {
               </tbody>
             </table>
           </div>
+          <Pagination
+            page={page}
+            pageSize={pageSize}
+            total={data.meta.total}
+            onPageChange={setPage}
+            onPageSizeChange={(n) => {
+              setPageSize(n);
+              setPage(1);
+            }}
+          />
         </Card>
       )}
     </div>

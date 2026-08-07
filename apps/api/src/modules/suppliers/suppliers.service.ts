@@ -16,6 +16,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { AuthUser } from '../../common/decorators';
 import { PERMISSIONS } from '../../common/permissions';
 import { paginate } from '../../common/dto/pagination.dto';
+import { countByStatus } from '../../common/status-counts';
 import {
   QuerySupplierDto,
   SupplierDecisionDto,
@@ -30,10 +31,14 @@ export class SuppliersService {
     private readonly notifications: NotificationsService,
   ) {}
 
-  async findAll(dto: QuerySupplierDto) {
-    const where: Prisma.SupplierWhereInput = {
+  /** Điều kiện lọc dùng chung cho danh sách và cho phần đếm theo trạng thái. */
+  private listWhere(
+    dto: QuerySupplierDto,
+    opts: { ignoreStatus?: boolean } = {},
+  ): Prisma.SupplierWhereInput {
+    return {
       deletedAt: null,
-      ...(dto.status ? { status: dto.status } : {}),
+      ...(dto.status && !opts.ignoreStatus ? { status: dto.status } : {}),
       ...(dto.categoryId
         ? { categories: { some: { categoryId: dto.categoryId } } }
         : {}),
@@ -48,6 +53,19 @@ export class SuppliersService {
           }
         : {}),
     };
+  }
+
+  /** Số nhà cung cấp theo từng trạng thái. */
+  async statusCounts(dto: QuerySupplierDto) {
+    return countByStatus(
+      this.prisma.supplier,
+      this.listWhere(dto, { ignoreStatus: true }),
+      SupplierStatus,
+    );
+  }
+
+  async findAll(dto: QuerySupplierDto) {
+    const where = this.listWhere(dto);
 
     const [data, total] = await this.prisma.$transaction([
       this.prisma.supplier.findMany({

@@ -2,36 +2,48 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* ---------------------------------------------------------------------------
+   Màu sắc
+   Nền hơi ngả xanh thay vì xám trung tính, để các thẻ trắng nổi lên rõ mà không
+   cần viền đậm. Màu chính là xanh mòng két — đủ nghiêm túc cho phần mềm nội bộ.
+--------------------------------------------------------------------------- */
 :root {
-  --background: #f8fafc;
-  --foreground: #0f172a;
+  --background: #f6f8fa;
+  --foreground: #0b1524;
   --card: #ffffff;
-  --card-foreground: #0f172a;
+  --card-foreground: #0b1524;
   --muted: #f1f5f9;
-  --muted-foreground: #64748b;
-  --border: #e2e8f0;
-  --input: #e2e8f0;
+  --muted-foreground: #5b6b7f;
+  --border: #e3e8ef;
+  --input: #d7dee8;
   --primary: #0f766e;
   --primary-foreground: #ffffff;
-  --accent: #f1f5f9;
+  --accent: #eef2f6;
   --destructive: #dc2626;
   --ring: #14b8a6;
+
+  /* Bóng đổ nhẹ, chỉ để tách lớp chứ không để trang trí. */
+  --shadow-card: 0 1px 2px rgba(11, 21, 36, 0.04), 0 1px 3px rgba(11, 21, 36, 0.06);
+  --shadow-pop: 0 8px 28px rgba(11, 21, 36, 0.14);
 }
 
 .dark {
-  --background: #020617;
-  --foreground: #e2e8f0;
-  --card: #0f172a;
-  --card-foreground: #e2e8f0;
-  --muted: #1e293b;
-  --muted-foreground: #94a3b8;
-  --border: #1e293b;
-  --input: #1e293b;
+  --background: #070c14;
+  --foreground: #e6edf5;
+  --card: #0e1620;
+  --card-foreground: #e6edf5;
+  --muted: #172230;
+  --muted-foreground: #93a3b8;
+  --border: #1e2a3a;
+  --input: #263344;
   --primary: #14b8a6;
-  --primary-foreground: #042f2e;
-  --accent: #1e293b;
+  --primary-foreground: #04211f;
+  --accent: #172230;
   --destructive: #f87171;
   --ring: #2dd4bf;
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-pop: 0 10px 34px rgba(0, 0, 0, 0.55);
 }
 
 @theme inline {
@@ -48,8 +60,37 @@
   --color-accent: var(--accent);
   --color-destructive: var(--destructive);
   --color-ring: var(--ring);
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+
+  /* -------------------------------------------------------------------------
+     Thang chữ
+     Chỉ năm bậc, dùng chung cho toàn bộ ứng dụng. Trước đây mỗi trang tự đặt
+     một cỡ nên cùng một loại nội dung lại to nhỏ khác nhau giữa các màn hình.
+
+       text-xs   12px  nhãn phụ, chú thích, siêu dữ liệu
+       text-sm   14px  cỡ mặc định của mọi nội dung trong bảng và biểu mẫu
+       text-base 16px  đoạn văn nổi bật
+       text-lg   18px  tiêu đề thẻ
+       text-2xl  24px  tiêu đề trang
+       text-3xl  30px  con số lớn trên thẻ chỉ số ở Tổng quan
+  ------------------------------------------------------------------------- */
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1.125rem;
+  --text-sm: 0.875rem;
+  --text-sm--line-height: 1.375rem;
+  --text-base: 1rem;
+  --text-base--line-height: 1.5rem;
+  --text-lg: 1.0625rem;
+  --text-lg--line-height: 1.5rem;
+  --text-2xl: 1.5rem;
+  --text-2xl--line-height: 1.875rem;
+  --text-3xl: 1.875rem;
+  --text-3xl--line-height: 2.25rem;
+
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
 }
 
 @layer base {
@@ -61,6 +102,41 @@
     background-color: var(--background);
     color: var(--foreground);
     font-family: var(--font-sans), system-ui, sans-serif;
+    /* 14px là cỡ nền của cả ứng dụng: phần mềm nghiệp vụ nhiều dữ liệu, 16px
+       làm bảng biểu dài ra mà không dễ đọc hơn. */
+    font-size: var(--text-sm);
+    line-height: var(--text-sm--line-height);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Chữ số thẳng cột trong mọi bảng biểu, không cần nhớ thêm class. */
+  table {
+    font-variant-numeric: tabular-nums;
+  }
+
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+  }
+
+  /* Vòng focus thống nhất, thấy rõ khi đi bằng bàn phím. */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* Ô của bảng. Trước đây mỗi trang một kiểu đệm nên bảng cao thấp khác nhau. */
+  .cell {
+    @apply px-4 py-2.5 align-top;
+  }
+
+  .cell-head {
+    @apply px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-muted-foreground;
   }
 }
 

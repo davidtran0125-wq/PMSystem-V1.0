@@ -182,7 +182,11 @@ export class AuthService {
     };
   }
 
-  private async issueTokens(userId: string, email: string, meta: RequestMeta) {
+  /**
+   * Cấp một cặp token mới. Dùng khi thao tác nào đó thu hồi toàn bộ phiên
+   * (ví dụ đổi mật khẩu) nhưng vẫn phải giữ thiết bị đang thao tác đăng nhập.
+   */
+  async issueTokens(userId: string, email: string, meta: RequestMeta) {
     const signOptions: JwtSignOptions = {
       secret: this.config.getOrThrow<string>('JWT_ACCESS_SECRET'),
       expiresIn: this.config.get<string>('JWT_ACCESS_EXPIRES_IN', '15m'),

@@ -1,5 +1,7 @@
 'use client';
 
+import Link from 'next/link';
+
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -10,31 +12,56 @@ import {
   EmptyState,
   Input,
   PageHeader,
-  Select,
+  Pagination,
+  StatusFilterBar,
   Skeleton,
   Textarea,
 } from '@/components/ui';
 import { SupplierStatusBadge } from '@/components/status-badge';
+import { ConfirmButton } from '@/components/confirm-button';
 import { api, apiErrorMessage } from '@/lib/api';
 import { useAuthStore } from '@/store/auth';
-import type { Paginated, Supplier } from '@/lib/types';
+import type { Paginated, Supplier, SupplierStatus } from '@/lib/types';
+
+const SUPPLIER_STATUSES: { value: SupplierStatus | ''; label: string }[] = [
+  { value: '', label: 'Tất cả trạng thái' },
+  { value: 'PENDING', label: 'Chờ duyệt' },
+  { value: 'APPROVED', label: 'Đã duyệt' },
+  { value: 'REJECTED', label: 'Từ chối' },
+  { value: 'SUSPENDED', label: 'Tạm ngưng' },
+];
 
 export default function SuppliersPage() {
   const queryClient = useQueryClient();
   const canApprove = useAuthStore((s) => s.can('supplier:approve'));
 
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [status, setStatus] = useState('');
   const [rejecting, setRejecting] = useState<string | null>(null);
   const [reason, setReason] = useState('');
 
+  /** Đếm theo trạng thái, không phụ thuộc trạng thái đang chọn. */
+  const counts = useQuery({
+    queryKey: ['supplier-counts', { search }],
+    queryFn: async () =>
+      (
+        await api.get<{ total: number; counts: Record<SupplierStatus, number> }>(
+          '/suppliers/status-counts',
+          { params: { ...(search ? { search } : {}) } },
+        )
+      ).data,
+  });
+
   const { data, isLoading } = useQuery({
-    queryKey: ['suppliers', { search, status }],
+    queryKey: ['suppliers', { search, status, page, pageSize }],
     queryFn: async () =>
       (
         await api.get<Paginated<Supplier>>('/suppliers', {
           params: {
-            pageSize: 50,
+                        page,
+            pageSize,
             ...(search ? { search } : {}),
             ...(status ? { status } : {}),
           },
@@ -77,19 +104,24 @@ export default function SuppliersPage() {
           className="min-w-56 flex-1"
           placeholder="Tìm theo tên, mã số thuế, email…"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
         />
-        <Select
-          className="w-52"
-          value={status}
-          onChange={(e) => setStatus(e.target.value)}
-        >
-          <option value="">Tất cả trạng thái</option>
-          <option value="PENDING">Chờ duyệt</option>
-          <option value="APPROVED">Đã duyệt</option>
-          <option value="REJECTED">Từ chối</option>
-        </Select>
       </div>
+
+      <StatusFilterBar
+        options={SUPPLIER_STATUSES}
+        value={status}
+        onChange={(v) => {
+          setStatus(v);
+          setPage(1);
+        }}
+        counts={counts.data?.counts}
+        total={counts.data?.total}
+        isLoading={counts.isLoading}
+      />
 
       {isLoading ? (
         <div className="space-y-3">
@@ -109,7 +141,12 @@ export default function SuppliersPage() {
               <CardContent className="flex flex-wrap items-start justify-between gap-4 p-5">
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="font-medium">{supplier.companyName}</h3>
+                    <Link
+                      href={`/suppliers/${supplier.id}`}
+                      className="font-medium hover:underline"
+                    >
+                      {supplier.companyName}
+                    </Link>
                     <SupplierStatusBadge status={supplier.status} />
                   </div>
                   <p className="mt-1 text-sm text-muted-foreground">
@@ -144,13 +181,15 @@ export default function SuppliersPage() {
 
                 {canApprove && supplier.status !== 'APPROVED' ? (
                   <div className="flex shrink-0 gap-2">
-                    <Button
+                    <ConfirmButton
                       size="sm"
-                      onClick={() => approve.mutate(supplier.id)}
+                      confirmLabel="Duyệt hồ sơ nhà cung cấp?"
+                      confirmActionLabel="Duyệt"
+                      onConfirm={() => approve.mutate(supplier.id)}
                       disabled={approve.isPending}
                     >
                       Duyệt
-                    </Button>
+                    </ConfirmButton>
                     <Button
                       size="sm"
                       variant="outline"
@@ -181,20 +220,34 @@ export default function SuppliersPage() {
                       >
                         Hủy
                       </Button>
-                      <Button
+                      <ConfirmButton
                         size="sm"
                         variant="destructive"
+                        confirmLabel="Từ chối hồ sơ này?"
+                        confirmActionLabel="Từ chối"
                         disabled={!reason.trim() || reject.isPending}
-                        onClick={() => reject.mutate(supplier.id)}
+                        onConfirm={() => reject.mutate(supplier.id)}
                       >
                         Xác nhận từ chối
-                      </Button>
+                      </ConfirmButton>
                     </div>
                   </div>
                 ) : null}
               </CardContent>
             </Card>
           ))}
+          <Card>
+            <Pagination
+              page={page}
+              pageSize={pageSize}
+              total={data.meta.total}
+              onPageChange={setPage}
+              onPageSizeChange={(n) => {
+                setPageSize(n);
+                setPage(1);
+              }}
+            />
+          </Card>
         </div>
       )}
     </div>

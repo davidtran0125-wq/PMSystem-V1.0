@@ -20,6 +20,7 @@ import { ApprovalRoutingService } from '../approvals/approval-routing.service';
 import { AuthUser } from '../../common/decorators';
 import { PERMISSIONS, ROLES } from '../../common/permissions';
 import { paginate } from '../../common/dto/pagination.dto';
+import { countByStatus } from '../../common/status-counts';
 import {
   CreatePurchaseRequestDto,
   PurchaseRequestItemDto,
@@ -40,7 +41,12 @@ const DETAIL_INCLUDE = {
   department: true,
   project: true,
   category: true,
-  items: { orderBy: { lineNo: 'asc' } },
+  items: {
+    orderBy: { lineNo: 'asc' },
+    include: {
+      material: { select: { id: true, code: true, name: true, unit: true } },
+    },
+  },
   dynamicValues: { include: { field: true } },
   approvalHistories: {
     orderBy: { createdAt: 'desc' },
@@ -48,7 +54,11 @@ const DETAIL_INCLUDE = {
   },
   attachments: { where: { deletedAt: null } },
   currentStep: { include: { role: true } },
-  approvalWorkflow: { include: { steps: { orderBy: { stepOrder: 'asc' }, include: { role: true } } } },
+  approvalWorkflow: {
+    include: {
+      steps: { orderBy: { stepOrder: 'asc' }, include: { role: true } },
+    },
+  },
   _count: { select: { comments: true, rfqs: true } },
 } satisfies Prisma.PurchaseRequestInclude;
 
@@ -62,10 +72,18 @@ export class PurchaseRequestsService {
     private readonly routing: ApprovalRoutingService,
   ) {}
 
-  async findAll(dto: QueryPurchaseRequestDto, user: AuthUser) {
+  /**
+   * Điều kiện lọc dùng chung cho danh sách và cho phần đếm theo trạng thái, để
+   * hai con số không bao giờ lệch nhau.
+   */
+  private listWhere(
+    dto: QueryPurchaseRequestDto,
+    user: AuthUser,
+    opts: { ignoreStatus?: boolean } = {},
+  ): Prisma.PurchaseRequestWhereInput {
     const where: Prisma.PurchaseRequestWhereInput = {
       deletedAt: null,
-      ...(dto.status ? { status: dto.status } : {}),
+      ...(dto.status && !opts.ignoreStatus ? { status: dto.status } : {}),
       ...(dto.priority ? { priority: dto.priority } : {}),
       ...(dto.categoryId ? { categoryId: dto.categoryId } : {}),
       ...(dto.departmentId ? { departmentId: dto.departmentId } : {}),
@@ -85,8 +103,26 @@ export class PurchaseRequestsService {
     if (!canReadAll || dto.mine) {
       where.requesterId = user.id;
     }
+    return where;
+  }
 
-    const [data, total] = await this.prisma.$transaction([
+  /**
+   * Số lượng yêu cầu theo từng trạng thái, tính trên đúng bộ lọc hiện hành trừ
+   * chính bộ lọc trạng thái — nhờ vậy các con số không đổi khi người dùng bấm
+   * qua lại giữa các trạng thái.
+   */
+  async statusCounts(dto: QueryPurchaseRequestDto, user: AuthUser) {
+    return countByStatus(
+      this.prisma.purchaseRequest,
+      this.listWhere(dto, user, { ignoreStatus: true }),
+      PurchaseRequestStatus,
+    );
+  }
+
+  async findAll(dto: QueryPurchaseRequestDto, user: AuthUser) {
+    const where = this.listWhere(dto, user);
+
+    const [rows, total] = await this.prisma.$transaction([
       this.prisma.purchaseRequest.findMany({
         where,
         skip: dto.skip,
@@ -99,13 +135,57 @@ export class PurchaseRequestsService {
             select: { id: true, name: true, nameEn: true, code: true },
           },
           department: { select: { id: true, name: true, code: true } },
-          _count: { select: { items: true, rfqs: true } },
         },
       }),
       this.prisma.purchaseRequest.count({ where }),
     ]);
 
+    const data = await this.withChildCounts(rows);
     return paginate(data, total, dto);
+  }
+
+  /**
+   * Gắn số dòng hàng và số RFQ vào từng yêu cầu của trang hiện tại.
+   *
+   * Không dùng `_count` trong `include`: Prisma dịch nó thành một truy vấn con
+   * `GROUP BY` trên **toàn bộ** bảng con rồi mới LEFT JOIN, tức là gom nhóm cả
+   * triệu dòng chỉ để lấy số cho mười dòng hiển thị. Ở mức một triệu yêu cầu,
+   * riêng phần đó tốn khoảng 2 giây. Đếm theo đúng mười id của trang thì chỉ
+   * còn vài mili giây.
+   */
+  private async withChildCounts<
+    T extends { id: string; _count?: { items: number; rfqs: number } },
+  >(rows: T[]): Promise<T[]> {
+    if (!rows.length) return rows;
+    const ids = rows.map((r) => r.id);
+
+    const [items, rfqs] = await Promise.all([
+      this.prisma.purchaseRequestItem.groupBy({
+        by: ['purchaseRequestId'],
+        where: { purchaseRequestId: { in: ids } },
+        _count: { _all: true },
+      }),
+      this.prisma.rfq.groupBy({
+        by: ['purchaseRequestId'],
+        where: { purchaseRequestId: { in: ids }, deletedAt: null },
+        _count: { _all: true },
+      }),
+    ]);
+
+    const itemCount = new Map(
+      items.map((r) => [r.purchaseRequestId, r._count._all]),
+    );
+    const rfqCount = new Map(
+      rfqs.map((r) => [r.purchaseRequestId, r._count._all]),
+    );
+
+    return rows.map((row) => ({
+      ...row,
+      _count: {
+        items: itemCount.get(row.id) ?? 0,
+        rfqs: rfqCount.get(row.id) ?? 0,
+      },
+    }));
   }
 
   /** Requests waiting at a step the caller holds the role for. */
@@ -140,7 +220,9 @@ export class PurchaseRequestsService {
         orderBy: { submittedAt: 'asc' },
         include: {
           requester: { select: { id: true, fullName: true, email: true } },
-          category: { select: { id: true, name: true, nameEn: true, code: true } },
+          category: {
+            select: { id: true, name: true, nameEn: true, code: true },
+          },
           department: { select: { id: true, name: true, code: true } },
           currentStep: { include: { role: true } },
           approvalWorkflow: { select: { id: true, name: true } },
@@ -149,7 +231,19 @@ export class PurchaseRequestsService {
       this.prisma.purchaseRequest.count({ where }),
     ]);
 
-    return paginate(data, total, dto);
+    // Đếm trên toàn bộ hàng chờ chứ không riêng trang đang xem.
+    const grouped = await this.prisma.purchaseRequest.groupBy({
+      by: ['status'],
+      where,
+      _count: { _all: true },
+    });
+
+    const counts = Object.fromEntries(
+      Object.values(PurchaseRequestStatus).map((s) => [s, 0]),
+    ) as Record<PurchaseRequestStatus, number>;
+    for (const row of grouped) counts[row.status] = row._count._all;
+
+    return { ...paginate(data, total, dto), counts };
   }
 
   async findOne(id: string, user: AuthUser) {
@@ -182,6 +276,7 @@ export class PurchaseRequestsService {
       false,
     );
     const items = this.normaliseItems(dto.items ?? []);
+    await this.assertMaterials(dto.categoryId, items, false);
     const code = await this.codes.next('PR');
 
     const request = await this.prisma.purchaseRequest.create({
@@ -235,6 +330,7 @@ export class PurchaseRequestsService {
     }
 
     const items = dto.items ? this.normaliseItems(dto.items) : null;
+    if (items) await this.assertMaterials(categoryId, items, false);
     const dynamicData =
       dto.dynamicValues || dto.categoryId
         ? await this.buildDynamicValues(categoryId, dto.dynamicValues, false)
@@ -309,6 +405,7 @@ export class PurchaseRequestsService {
         'Add at least one line item before submitting',
       );
     }
+    await this.assertMaterials(current.categoryId, current.items, true);
 
     // Required dynamic fields are only enforced at submit time so drafts can
     // be saved incrementally.
@@ -436,7 +533,10 @@ export class PurchaseRequestsService {
       : null;
     const nextStep =
       current.approvalWorkflowId && step
-        ? await this.routing.nextStep(current.approvalWorkflowId, step.stepOrder)
+        ? await this.routing.nextStep(
+            current.approvalWorkflowId,
+            step.stepOrder,
+          )
         : null;
 
     const updated = await this.prisma.purchaseRequest.update({
@@ -725,6 +825,58 @@ export class PurchaseRequestsService {
     });
     if (!category)
       throw new BadRequestException('Category not found or inactive');
+    return category;
+  }
+
+  /**
+   * Nhóm hàng hóa bắt buộc có mã vật tư; nhóm dịch vụ thì không. Bản nháp chấp
+   * nhận mã đang chờ duyệt để người dùng chuẩn bị song song, nhưng lúc gửi
+   * duyệt (`strict`) thì mã phải đã được ban hành.
+   */
+  private async assertMaterials(
+    categoryId: string,
+    items: { materialId?: string | null; name: string }[],
+    strict: boolean,
+  ) {
+    const category = await this.prisma.category.findUnique({
+      where: { id: categoryId },
+      select: { requiresMaterial: true, name: true },
+    });
+    if (!category?.requiresMaterial) return;
+
+    const missing = items.filter((i) => !i.materialId);
+    if (missing.length) {
+      throw new BadRequestException(
+        `Nhóm "${category.name}" bắt buộc chọn mã vật tư. Thiếu mã ở dòng hàng: ` +
+          missing.map((i) => `"${i.name}"`).join(', '),
+      );
+    }
+
+    const ids = [...new Set(items.map((i) => i.materialId!))];
+    const materials = await this.prisma.material.findMany({
+      where: { id: { in: ids }, deletedAt: null },
+      select: { id: true, code: true, status: true },
+    });
+    const byId = new Map(materials.map((m) => [m.id, m]));
+
+    for (const item of items) {
+      const material = byId.get(item.materialId!);
+      if (!material) {
+        throw new BadRequestException(
+          `Mã vật tư của dòng hàng "${item.name}" không tồn tại`,
+        );
+      }
+      if (material.status === 'INACTIVE') {
+        throw new BadRequestException(
+          `Mã ${material.code} đã ngừng dùng, không đặt hàng được nữa`,
+        );
+      }
+      if (strict && material.status !== 'ACTIVE') {
+        throw new BadRequestException(
+          `Mã ${material.code} còn chờ admin duyệt. Chờ mã được ban hành rồi hãy gửi duyệt yêu cầu.`,
+        );
+      }
+    }
   }
 
   /**
@@ -811,6 +963,7 @@ export class PurchaseRequestsService {
   private normaliseItems(items: PurchaseRequestItemDto[]) {
     return items.map((item, index) => ({
       lineNo: item.lineNo ?? index + 1,
+      materialId: item.materialId ?? null,
       name: item.name,
       description: item.description,
       specification: item.specification,

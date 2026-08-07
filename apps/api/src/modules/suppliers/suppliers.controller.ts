@@ -47,6 +47,13 @@ export class SuppliersController {
     return this.service.update(user.supplierId ?? '', dto, user);
   }
 
+  @Get('status-counts')
+  @RequirePermissions(PERMISSIONS.SUPPLIER_READ)
+  @ApiOperation({ summary: 'Số nhà cung cấp theo từng trạng thái' })
+  statusCounts(@Query() dto: QuerySupplierDto) {
+    return this.service.statusCounts(dto);
+  }
+
   @Get(':id')
   @RequirePermissions(PERMISSIONS.SUPPLIER_READ)
   findOne(

@@ -44,6 +44,7 @@ console.log('\n=== 1. Auth ===');
 const admin = await login('admin@pms.local', 'Admin@123');
 const buyer = await login('buyer@pms.local', 'Admin@123');
 const enduser = await login('user@pms.local', 'Admin@123');
+const manager = await login('manager@pms.local', 'Admin@123');
 check('admin/buyer/enduser logged in', !!(admin && buyer && enduser));
 
 console.log('\n=== 2. Categories & dynamic form ===');
@@ -56,13 +57,21 @@ const created = await call('POST', '/categories', { token: enduser, body: { name
 check('end user cannot create category (403)', created.status === 403, created.data);
 
 console.log('\n=== 3. Purchase Request lifecycle ===');
+// Nhóm hàng hóa bắt buộc có mã vật tư. Admin tạo mã thì được duyệt ngay.
+const matReq = await call('POST', '/materials', { token: admin, body: {
+  code: 'HC-NAOH-37', name: 'NaOH 37%', unit: 'kg', categoryId: chemical.id, standardPrice: 42000,
+}});
+const naohId = matReq.data.materialId
+  ?? (await call('GET', '/materials?search=HC-NAOH-37', { token: admin })).data.data[0].id;
+check('material code available for the PR', Boolean(naohId), matReq.data);
+
 const prRes = await call('POST', '/purchase-requests', { token: enduser, body: {
   title: 'Mua NaOH 37% cho line 2',
   reason: 'Bổ sung tồn kho quý 3',
   categoryId: chemical.id,
   priority: 'HIGH',
   budgetAmount: 250000000,
-  items: [{ name: 'NaOH 37%', quantity: 5000, unit: 'kg', estimatedPrice: 42000 }],
+  items: [{ materialId: naohId, name: 'NaOH 37%', quantity: 5000, unit: 'kg', estimatedPrice: 42000 }],
   dynamicValues: { casNumber: '1310-73-2', concentration: '37%', quantity: 5000 },
 }});
 check('PR created as DRAFT', prRes.status === 201 && prRes.data.status === 'DRAFT', prRes.data);
@@ -73,7 +82,7 @@ check('dynamic values stored', pr.dynamicValues.length >= 3, pr.dynamicValues.le
 
 const badField = await call('POST', '/purchase-requests', { token: enduser, body: {
   title: 'bad', categoryId: chemical.id,
-  items: [{ name: 'x', quantity: 1, unit: 'kg' }],
+  items: [{ materialId: naohId, name: 'x', quantity: 1, unit: 'kg' }],
   dynamicValues: { notARealField: 'x' },
 }});
 check('unknown dynamic field rejected (400)', badField.status === 400, badField.data);
@@ -90,22 +99,32 @@ check('PR submitted', submitted.status === 201 && submitted.data.status === 'SUB
 const endUserApprove = await call('POST', `/purchase-requests/${pr.id}/approve`, { token: enduser, body: {} });
 check('end user cannot approve (403)', endUserApprove.status === 403, endUserApprove.data);
 
-const clarify = await call('POST', `/purchase-requests/${pr.id}/request-clarification`, { token: buyer, body: { comment: 'Bổ sung SDS và thời hạn giao hàng.' }});
-check('buyer requested clarification', clarify.data.status === 'NEED_CLARIFICATION', clarify.data);
+// Giá trị 210 triệu rơi vào chuỗi 2 cấp: Department Manager duyệt trước Buyer.
+const wrongLevel = await call('POST', `/purchase-requests/${pr.id}/approve`, { token: buyer, body: {} });
+check('buyer cannot jump the approval chain (403)', wrongLevel.status === 403, wrongLevel.data);
+
+const clarify = await call('POST', `/purchase-requests/${pr.id}/request-clarification`, { token: manager, body: { comment: 'Bổ sung SDS và thời hạn giao hàng.' }});
+check('manager requested clarification', clarify.data.status === 'NEED_CLARIFICATION', clarify.data);
 
 const notif = await call('GET', '/notifications?unreadOnly=true', { token: enduser });
 check('requester notified of clarification', notif.data.data.some(n => n.event === 'PR_NEED_CLARIFICATION'), notif.data.meta);
 
-const rejectNoReason = await call('POST', `/purchase-requests/${pr.id}/reject`, { token: buyer, body: {} });
+const rejectNoReason = await call('POST', `/purchase-requests/${pr.id}/reject`, { token: manager, body: {} });
 check('reject without reason blocked (400)', rejectNoReason.status === 400, rejectNoReason.data);
 
 const edited = await call('PATCH', `/purchase-requests/${pr.id}`, { token: enduser, body: { description: 'Đã bổ sung SDS.' }});
 check('requester can edit after clarification', edited.status === 200, edited.data);
 
 await call('POST', `/purchase-requests/${pr.id}/submit`, { token: enduser });
-await call('POST', `/purchase-requests/${pr.id}/start-review`, { token: buyer });
+await call('POST', `/purchase-requests/${pr.id}/start-review`, { token: manager });
+const lvl1 = await call('POST', `/purchase-requests/${pr.id}/approve`, { token: manager, body: { comment: 'Đúng nhu cầu bộ phận.' }});
+check('level 1 approved but chain not finished',
+  lvl1.status === 201 && lvl1.data.status !== 'APPROVED', { status: lvl1.status, prStatus: lvl1.data.status });
+check('chain moved to the buyer step',
+  lvl1.data.currentStep?.role?.code === 'BUYER' || lvl1.data.currentStep?.name?.includes('Buyer'),
+  lvl1.data.currentStep);
 const approved = await call('POST', `/purchase-requests/${pr.id}/approve`, { token: buyer, body: { comment: 'OK, tiến hành RFQ.' }});
-check('PR approved', approved.data.status === 'APPROVED', approved.data);
+check('PR approved after full chain', approved.data.status === 'APPROVED', approved.data);
 check('approval history recorded', approved.data.approvalHistories.length >= 4, approved.data.approvalHistories?.length);
 
 console.log('\n=== 4. Comments ===');
@@ -121,10 +140,10 @@ check('buyer sees all comments', listAsBuyer.data.length === 2, listAsBuyer.data
 console.log('\n=== 5. Supplier registration & approval ===');
 const stamp = Date.now();
 const supA = await call('POST', '/auth/register/supplier', { body: {
-  email: `a${stamp}@sup.local`, password: 'Supplier@123', contactPerson: 'Nguyen A', companyName: 'Cong ty A', taxCode: `A${stamp}`,
+  email: `a${stamp}@sup.local`, password: 'Admin@123', contactPerson: 'Nguyen A', companyName: 'Cong ty A', taxCode: `A${stamp}`,
 }});
 const supB = await call('POST', '/auth/register/supplier', { body: {
-  email: `b${stamp}@sup.local`, password: 'Supplier@123', contactPerson: 'Tran B', companyName: 'Cong ty B', taxCode: `B${stamp}`,
+  email: `b${stamp}@sup.local`, password: 'Admin@123', contactPerson: 'Tran B', companyName: 'Cong ty B', taxCode: `B${stamp}`,
 }});
 check('two suppliers registered PENDING', supA.data.user.supplier.status === 'PENDING' && supB.data.user.supplier.status === 'PENDING', supA.data.user?.supplier?.status);
 const supAId = supA.data.user.supplier.id, supBId = supB.data.user.supplier.id;
@@ -189,9 +208,22 @@ check('lowest price flagged on A', rowA.isLowestPrice === true && rowB.isLowestP
 check('shortest lead time flagged on B', rowB.isShortestLeadTime === true && rowA.isShortestLeadTime === false, { a: rowA.isShortestLeadTime, b: rowB.isShortestLeadTime });
 check('B price gap computed (10%)', rowB.diffFromLowestPercent === 10, rowB.diffFromLowestPercent);
 
-const award = await call('POST', `/rfqs/${rfq.id}/award`, { token: buyer, body: { quotationId: rowA.quotationId, note: 'Giá tốt nhất' }});
-check('RFQ awarded to A', award.data.status === 'AWARDED' && award.data.awardedQuotationId === rowA.quotationId, award.data);
-const awardAgain = await call('POST', `/rfqs/${rfq.id}/award`, { token: buyer, body: { quotationId: rowB.quotationId }});
+// Trao trọn gói cho A: bỏ itemIds nghĩa là lấy hết dòng hàng của báo giá đó.
+const award = await call('POST', `/rfqs/${rfq.id}/award`, { token: buyer, body: {
+  awards: [{ quotationId: rowA.quotationId }], note: 'Giá tốt nhất',
+}});
+check('RFQ awarded to A', award.data.status === 'AWARDED', award.data);
+
+const afterAward = await call('GET', `/rfqs/${rfq.id}/compare`, { token: buyer });
+const wonA = afterAward.data.quotations.find((q) => q.quotationId === rowA.quotationId);
+const lostB = afterAward.data.quotations.find((q) => q.quotationId === rowB.quotationId);
+check('A trung tron goi, B bi loai',
+  wonA.isAwarded && wonA.awardedItemIds.length === wonA.items.length && !lostB.isAwarded,
+  { a: wonA.awardedItemIds.length, b: lostB.isAwarded });
+
+const awardAgain = await call('POST', `/rfqs/${rfq.id}/award`, { token: buyer, body: {
+  awards: [{ quotationId: rowB.quotationId }],
+}});
 check('re-award blocked (400)', awardAgain.status === 400, awardAgain.data);
 
 console.log('\n=== 9. Dashboard & audit ===');

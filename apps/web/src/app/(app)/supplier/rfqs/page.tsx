@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Badge,
@@ -8,21 +9,51 @@ import {
   CardContent,
   EmptyState,
   PageHeader,
+  Pagination,
   Skeleton,
+  StatusFilterBar,
 } from '@/components/ui';
 import { RfqStatusBadge } from '@/components/status-badge';
 import { api } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth';
-import type { Paginated, Rfq } from '@/lib/types';
+import type { Paginated, Rfq, RfqStatus } from '@/lib/types';
+
+/** Nhà cung cấp không thấy RFQ nháp của bên mua nên không liệt kê DRAFT. */
+const STATUSES: { value: RfqStatus | ''; label: string }[] = [
+  { value: '', label: 'Tất cả' },
+  { value: 'SENT', label: 'Đang mời báo giá' },
+  { value: 'CLOSED', label: 'Đã đóng' },
+  { value: 'AWARDED', label: 'Đã có kết quả' },
+  { value: 'CANCELLED', label: 'Đã hủy' },
+];
 
 export default function SupplierRfqsPage() {
   const supplier = useAuthStore((s) => s.user?.supplier);
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['supplier-rfqs'],
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [status, setStatus] = useState('');
+
+  /** Đếm trên toàn bộ RFQ được mời, không riêng trang đang xem. */
+  const counts = useQuery({
+    queryKey: ['supplier-rfq-counts'],
     queryFn: async () =>
-      (await api.get<Paginated<Rfq>>('/rfqs', { params: { pageSize: 50 } })).data,
+      (
+        await api.get<{ total: number; counts: Record<RfqStatus, number> }>(
+          '/rfqs/status-counts',
+        )
+      ).data,
+  });
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['supplier-rfqs', { page, pageSize, status }],
+    queryFn: async () =>
+      (
+        await api.get<Paginated<Rfq>>('/rfqs', {
+          params: { page, pageSize, ...(status ? { status } : {}) },
+        })
+      ).data,
   });
 
   return (
@@ -49,6 +80,18 @@ export default function SupplierRfqsPage() {
           </CardContent>
         </Card>
       ) : null}
+
+      <StatusFilterBar
+        options={STATUSES}
+        value={status}
+        onChange={(v) => {
+          setStatus(v);
+          setPage(1);
+        }}
+        counts={counts.data?.counts}
+        total={counts.data?.total}
+        isLoading={counts.isLoading}
+      />
 
       {isLoading ? (
         <div className="space-y-3">
@@ -83,6 +126,18 @@ export default function SupplierRfqsPage() {
               </Card>
             </Link>
           ))}
+          <Card>
+            <Pagination
+              page={data.meta.page}
+              pageSize={data.meta.pageSize}
+              total={data.meta.total}
+              onPageChange={setPage}
+              onPageSizeChange={(size) => {
+                setPageSize(size);
+                setPage(1);
+              }}
+            />
+          </Card>
         </div>
       )}
     </div>

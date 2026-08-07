@@ -50,16 +50,14 @@ export class AiService {
     const client = this.getClient();
 
     const content: Anthropic.ContentBlockParam[] = [
-      ...(options.documents ?? []).map(
-        (doc): Anthropic.ContentBlockParam => ({
-          type: 'document',
-          source: {
-            type: 'base64',
-            media_type: doc.mediaType as 'application/pdf',
-            data: doc.base64,
-          },
-        }),
-      ),
+      ...(options.documents ?? []).map((doc): Anthropic.ContentBlockParam => ({
+        type: 'document',
+        source: {
+          type: 'base64',
+          media_type: doc.mediaType as 'application/pdf',
+          data: doc.base64,
+        },
+      })),
       { type: 'text', text: options.prompt },
     ];
 

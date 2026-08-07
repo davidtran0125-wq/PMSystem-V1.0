@@ -2,7 +2,7 @@
 
 import { useParams, useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, FileDown } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   Button,
@@ -14,6 +14,8 @@ import {
   Skeleton,
 } from '@/components/ui';
 import { PoStatusBadge } from '@/components/status-badge';
+import { saveFile } from '@/components/attachments';
+import { ConfirmButton } from '@/components/confirm-button';
 import { api, apiErrorMessage } from '@/lib/api';
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils';
 import type { PurchaseOrder } from '@/lib/types';
@@ -37,6 +39,11 @@ export default function SupplierPurchaseOrderDetailPage() {
       void queryClient.invalidateQueries({ queryKey: ['supplier-purchase-orders'] });
     },
     onError: (error) => toast.error(apiErrorMessage(error)),
+  });
+
+  const pdf = useMutation({
+    mutationFn: async () => saveFile(`/purchase-orders/${id}/pdf`, `${po?.code ?? 'don-hang'}.pdf`),
+    onError: (error) => toast.error(apiErrorMessage(error, 'Không tải được file PDF')),
   });
 
   if (isLoading || !po) {
@@ -64,15 +71,27 @@ export default function SupplierPurchaseOrderDetailPage() {
         title={`${po.code} — ${po.title}`}
         description={`Bên mua: ${po.buyer.fullName} · Phát hành ${formatDateTime(po.issuedAt)}`}
         actions={
-          po.status === 'ISSUED' ? (
+          <div className="flex flex-wrap gap-2">
             <Button
-              onClick={() => acknowledge.mutate()}
-              disabled={acknowledge.isPending}
+              variant="outline"
+              disabled={pdf.isPending}
+              onClick={() => pdf.mutate()}
             >
-              <CheckCircle2 className="h-4 w-4" />
-              Xác nhận đơn hàng
+              <FileDown className="h-4 w-4" />
+              {pdf.isPending ? 'Đang tạo PDF…' : 'Tải PDF'}
             </Button>
-          ) : null
+            {po.status === 'ISSUED' ? (
+              <ConfirmButton
+                confirmLabel="Xác nhận nhận đơn hàng này?"
+                confirmActionLabel="Xác nhận"
+                onConfirm={() => acknowledge.mutate()}
+                disabled={acknowledge.isPending}
+              >
+                <CheckCircle2 className="h-4 w-4" />
+                Xác nhận đơn hàng
+              </ConfirmButton>
+            ) : null}
+          </div>
         }
       />
 
@@ -95,27 +114,27 @@ export default function SupplierPurchaseOrderDetailPage() {
         </CardHeader>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="border-y border-border bg-muted/50 text-left">
+            <thead className="border-y border-border bg-muted/40 text-left">
               <tr>
-                <th className="px-4 py-2 font-medium">#</th>
-                <th className="px-4 py-2 font-medium">Hàng hóa</th>
-                <th className="px-4 py-2 font-medium">Số lượng</th>
-                <th className="px-4 py-2 font-medium">Đơn giá</th>
-                <th className="px-4 py-2 font-medium">Thành tiền</th>
+                <th className="cell-head">#</th>
+                <th className="cell-head">Hàng hóa</th>
+                <th className="cell-head">Số lượng</th>
+                <th className="cell-head">Đơn giá</th>
+                <th className="cell-head">Thành tiền</th>
               </tr>
             </thead>
             <tbody>
               {po.items.map((item) => (
                 <tr key={item.id} className="border-b border-border last:border-0">
-                  <td className="px-4 py-2">{item.lineNo}</td>
-                  <td className="px-4 py-2">{item.name}</td>
-                  <td className="px-4 py-2 tabular-nums">
+                  <td className="cell">{item.lineNo}</td>
+                  <td className="cell">{item.name}</td>
+                  <td className="cell tabular-nums">
                     {Number(item.quantity).toLocaleString('vi-VN')} {item.unit}
                   </td>
-                  <td className="px-4 py-2 tabular-nums">
+                  <td className="cell tabular-nums">
                     {formatCurrency(item.unitPrice, po.currency)}
                   </td>
-                  <td className="px-4 py-2 tabular-nums">
+                  <td className="cell tabular-nums">
                     {formatCurrency(item.lineTotal, po.currency)}
                   </td>
                 </tr>

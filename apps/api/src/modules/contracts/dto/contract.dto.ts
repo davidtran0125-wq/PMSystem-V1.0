@@ -11,7 +11,10 @@ import {
   Min,
 } from 'class-validator';
 import { CertificateStatus, ContractStatus } from '@prisma/client';
-import { BooleanQuery, PaginationDto } from '../../../common/dto/pagination.dto';
+import {
+  BooleanQuery,
+  PaginationDto,
+} from '../../../common/dto/pagination.dto';
 
 export class CreateContractDto {
   @ApiProperty({ example: 'HD-2026-001' })
@@ -91,7 +94,9 @@ export class QueryContractDto extends PaginationDto {
   @IsUUID()
   supplierId?: string;
 
-  @ApiPropertyOptional({ description: 'Chỉ hợp đồng sắp hết hạn trong 90 ngày' })
+  @ApiPropertyOptional({
+    description: 'Chỉ hợp đồng sắp hết hạn trong 90 ngày',
+  })
   @IsOptional()
   @BooleanQuery()
   @IsBoolean()
@@ -147,7 +152,9 @@ export class QueryCertificateDto extends PaginationDto {
   @IsUUID()
   supplierId?: string;
 
-  @ApiPropertyOptional({ description: 'Chỉ chứng chỉ sắp hết hạn trong 90 ngày' })
+  @ApiPropertyOptional({
+    description: 'Chỉ chứng chỉ sắp hết hạn trong 90 ngày',
+  })
   @IsOptional()
   @BooleanQuery()
   @IsBoolean()

@@ -15,7 +15,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { RfqStatus } from '@prisma/client';
+import { QuotationStatus, RfqStatus } from '@prisma/client';
 import { PaginationDto } from '../../../common/dto/pagination.dto';
 
 export class CreateRfqDto {
@@ -79,6 +79,12 @@ export class QueryRfqDto extends PaginationDto {
   @IsOptional()
   @IsEnum(RfqStatus)
   status?: RfqStatus;
+
+  /** Dùng cho danh sách báo giá của nhà cung cấp, không phải trạng thái RFQ. */
+  @ApiPropertyOptional({ enum: QuotationStatus })
+  @IsOptional()
+  @IsEnum(QuotationStatus)
+  quotationStatus?: QuotationStatus;
 }
 
 export class QuotationItemDto {
@@ -180,10 +186,33 @@ export class SubmitQuotationDto {
   items!: QuotationItemDto[];
 }
 
-export class AwardRfqDto {
-  @ApiProperty()
+export class AwardItemDto {
+  @ApiProperty({ description: 'Báo giá được trao thầu' })
   @IsUUID()
   quotationId!: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    description:
+      'Các dòng hàng trúng thầu của báo giá này. Bỏ trống nghĩa là trao toàn bộ báo giá.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsUUID('4', { each: true })
+  itemIds?: string[];
+}
+
+export class AwardRfqDto {
+  @ApiProperty({
+    type: [AwardItemDto],
+    description: 'Cho phép trao thầu cho nhiều nhà cung cấp cùng lúc',
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => AwardItemDto)
+  awards!: AwardItemDto[];
 
   @ApiPropertyOptional()
   @IsOptional()

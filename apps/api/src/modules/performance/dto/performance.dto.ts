@@ -1,5 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
+import { PaginationDto } from '../../../common/dto/pagination.dto';
 import {
+  ArrayMinSize,
+  IsArray,
   IsDateString,
   IsInt,
   IsNumber,
@@ -7,8 +11,29 @@ import {
   IsString,
   IsUUID,
   Max,
+  MaxLength,
   Min,
+  ValidateNested,
 } from 'class-validator';
+
+export class CriteriaScoreDto {
+  @ApiProperty({
+    description: 'Tiêu chí đánh giá, cấu hình trong phần Thiết lập',
+  })
+  @IsUUID()
+  criteriaId!: string;
+
+  @ApiProperty({ description: 'Điểm chấm, từ 1 đến thang điểm của tiêu chí' })
+  @IsInt()
+  @Min(1)
+  score!: number;
+
+  @ApiPropertyOptional({ description: 'Nhận xét riêng cho tiêu chí này' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  comment?: string;
+}
 
 export class CreatePerformanceDto {
   @ApiProperty()
@@ -23,45 +48,39 @@ export class CreatePerformanceDto {
   @IsDateString()
   periodEnd!: string;
 
-  @ApiProperty({ minimum: 1, maximum: 5, description: 'Giá' })
-  @IsInt()
-  @Min(1)
-  @Max(5)
-  priceScore!: number;
+  @ApiProperty({
+    type: [CriteriaScoreDto],
+    description: 'Điểm và nhận xét từng tiêu chí',
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => CriteriaScoreDto)
+  scores!: CriteriaScoreDto[];
 
-  @ApiProperty({ minimum: 1, maximum: 5, description: 'Chất lượng' })
-  @IsInt()
-  @Min(1)
-  @Max(5)
-  qualityScore!: number;
-
-  @ApiProperty({ minimum: 1, maximum: 5, description: 'Giao hàng' })
-  @IsInt()
-  @Min(1)
-  @Max(5)
-  deliveryScore!: number;
-
-  @ApiProperty({ minimum: 1, maximum: 5, description: 'Thời gian phản hồi' })
-  @IsInt()
-  @Min(1)
-  @Max(5)
-  responseScore!: number;
-
-  @ApiProperty({ minimum: 1, maximum: 5, description: 'Hợp tác' })
-  @IsInt()
-  @Min(1)
-  @Max(5)
-  cooperationScore!: number;
-
-  @ApiPropertyOptional({ description: 'Tỷ lệ khiếu nại (%)', default: 0 })
+  @ApiPropertyOptional({
+    description: 'Tỷ lệ khiếu nại (%), trừ thẳng vào điểm tổng',
+    default: 0,
+  })
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   @Max(100)
   complaintRate?: number;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'Nhận xét chung cho cả kỳ' })
   @IsOptional()
   @IsString()
   note?: string;
+}
+
+/**
+ * `ValidationPipe` bật whitelist + forbidNonWhitelisted, nên `supplierId` phải
+ * được khai báo ở DTO chứ không thể chỉ đọc qua @Query rời.
+ */
+export class QueryPerformanceDto extends PaginationDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  supplierId?: string;
 }

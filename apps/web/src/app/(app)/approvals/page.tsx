@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { CheckSquare } from 'lucide-react';
 import {
@@ -8,6 +9,7 @@ import {
   Card,
   EmptyState,
   PageHeader,
+  Pagination,
   Skeleton,
 } from '@/components/ui';
 import { PriorityBadge, PrStatusBadge } from '@/components/status-badge';
@@ -20,22 +22,32 @@ import type {
   PurchaseRequest,
 } from '@/lib/types';
 
+type PendingQueue = Paginated<PendingRequest> & {
+  counts: Record<PurchaseRequest['status'], number>;
+};
+
 type PendingRequest = PurchaseRequest & {
   currentStep: (ApprovalStep & { role?: { name: string } | null }) | null;
   approvalWorkflow: ApprovalWorkflowRef | null;
 };
 
 export default function ApprovalsPage() {
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
   const { data, isLoading } = useQuery({
-    queryKey: ['pending-approvals'],
+    queryKey: ['pending-approvals', { page, pageSize }],
     queryFn: async () =>
       (
-        await api.get<Paginated<PendingRequest>>(
+        await api.get<PendingQueue>(
           '/purchase-requests/pending-approval',
-          { params: { pageSize: 50 } },
+          { params: { page, pageSize } },
         )
       ).data,
   });
+
+  /** Đếm trên cả hàng chờ, do máy chủ trả về, không chỉ trang đang xem. */
+  const byStatus = Object.entries(data?.counts ?? {}).filter(([, n]) => n > 0);
 
   return (
     <div>
@@ -43,6 +55,21 @@ export default function ApprovalsPage() {
         title="Chờ tôi duyệt"
         description="Yêu cầu đang dừng ở cấp duyệt mà bạn phụ trách."
       />
+
+      {data?.meta.total ? (
+        <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
+          <Badge tone="info">Tổng cộng {data.meta.total}</Badge>
+          {byStatus.map(([status, n]) => (
+            <span
+              key={status}
+              className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1"
+            >
+              <PrStatusBadge status={status as PendingRequest['status']} />
+              <span className="tabular-nums text-muted-foreground">{n}</span>
+            </span>
+          ))}
+        </div>
+      ) : null}
 
       {isLoading ? (
         <div className="space-y-3">
@@ -56,6 +83,7 @@ export default function ApprovalsPage() {
           description="Khi một yêu cầu đi tới cấp duyệt của bạn, nó sẽ xuất hiện ở đây."
         />
       ) : (
+        <>
         <div className="grid gap-3">
           {data.data.map((pr) => (
             <Link key={pr.id} href={`/purchase-requests/${pr.id}`}>
@@ -100,6 +128,19 @@ export default function ApprovalsPage() {
             </Link>
           ))}
         </div>
+        <Card className="mt-3">
+          <Pagination
+            page={data.meta.page}
+            pageSize={data.meta.pageSize}
+            total={data.meta.total}
+            onPageChange={setPage}
+            onPageSizeChange={(size) => {
+              setPageSize(size);
+              setPage(1);
+            }}
+          />
+        </Card>
+        </>
       )}
     </div>
   );

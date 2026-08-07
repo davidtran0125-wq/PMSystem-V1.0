@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search } from 'lucide-react';
+import { Paperclip, Plus, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   Badge,
@@ -17,12 +17,15 @@ import {
   Input,
   Label,
   PageHeader,
+  Pagination,
   Select,
+  StatusFilterBar,
   Skeleton,
   Textarea,
 } from '@/components/ui';
 import { ContractStatusBadge, DaysRemaining } from '@/components/status-badge';
 import { AiFinding, AiList, AiPanel, useAiStatus } from '@/components/ai-panel';
+import { Attachments } from '@/components/attachments';
 import { api, apiErrorMessage } from '@/lib/api';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth';
@@ -30,6 +33,7 @@ import type {
   Category,
   Contract,
   ContractReview,
+  ContractStatus,
   Paginated,
   Supplier,
 } from '@/lib/types';
@@ -47,15 +51,28 @@ interface FormValues {
   note: string;
 }
 
+const CONTRACT_STATUSES: { value: ContractStatus | ''; label: string }[] = [
+  { value: '', label: 'Tất cả trạng thái' },
+  { value: 'DRAFT', label: 'Nháp' },
+  { value: 'ACTIVE', label: 'Đang hiệu lực' },
+  { value: 'EXPIRING', label: 'Sắp hết hạn' },
+  { value: 'EXPIRED', label: 'Đã hết hạn' },
+  { value: 'TERMINATED', label: 'Đã chấm dứt' },
+  { value: 'RENEWED', label: 'Đã gia hạn' },
+];
+
 export default function ContractsPage() {
   const queryClient = useQueryClient();
   const canWrite = useAuthStore((s) => s.can('contract:write'));
 
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [status, setStatus] = useState('');
   const [expiringOnly, setExpiringOnly] = useState(false);
   const [creating, setCreating] = useState(false);
   const [reviewing, setReviewing] = useState<Contract | null>(null);
+  const [docsFor, setDocsFor] = useState<Contract | null>(null);
   const ai = useAiStatus();
 
   const {
@@ -67,13 +84,31 @@ export default function ContractsPage() {
     defaultValues: { currency: 'VND', renewalOption: false },
   });
 
+  /** Đếm theo trạng thái, không phụ thuộc trạng thái đang chọn. */
+  const counts = useQuery({
+    queryKey: ['contract-counts', { search, expiringOnly }],
+    queryFn: async () =>
+      (
+        await api.get<{ total: number; counts: Record<ContractStatus, number> }>(
+          '/contracts/status-counts',
+          {
+            params: {
+              ...(search ? { search } : {}),
+              ...(expiringOnly ? { expiringOnly: true } : {}),
+            },
+          },
+        )
+      ).data,
+  });
+
   const { data, isLoading } = useQuery({
-    queryKey: ['contracts', { search, status, expiringOnly }],
+    queryKey: ['contracts', { search, status, expiringOnly, page, pageSize }],
     queryFn: async () =>
       (
         await api.get<Paginated<Contract>>('/contracts', {
           params: {
-            pageSize: 50,
+                        page,
+            pageSize,
             ...(search ? { search } : {}),
             ...(status ? { status } : {}),
             ...(expiringOnly ? { expiringOnly: true } : {}),
@@ -84,6 +119,8 @@ export default function ContractsPage() {
 
   const suppliers = useQuery({
     queryKey: ['suppliers', 'approved'],
+    // Danh mục tham chiếu gần như không đổi trong một phiên làm việc.
+    staleTime: 10 * 60_000,
     queryFn: async () =>
       (
         await api.get<Paginated<Supplier>>('/suppliers', {
@@ -95,6 +132,8 @@ export default function ContractsPage() {
 
   const categories = useQuery({
     queryKey: ['categories', 'active'],
+    // Danh mục tham chiếu gần như không đổi trong một phiên làm việc.
+    staleTime: 10 * 60_000,
     queryFn: async () =>
       (
         await api.get<Paginated<Category>>('/categories', {
@@ -255,20 +294,12 @@ export default function ContractsPage() {
             className="pl-9"
             placeholder="Tìm theo số hoặc tên hợp đồng…"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
           />
         </div>
-        <Select
-          className="w-52"
-          value={status}
-          onChange={(e) => setStatus(e.target.value)}
-        >
-          <option value="">Tất cả trạng thái</option>
-          <option value="ACTIVE">Đang hiệu lực</option>
-          <option value="EXPIRING">Sắp hết hạn</option>
-          <option value="EXPIRED">Đã hết hạn</option>
-          <option value="TERMINATED">Đã chấm dứt</option>
-        </Select>
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
@@ -279,6 +310,18 @@ export default function ContractsPage() {
           Sắp hết hạn trong 90 ngày
         </label>
       </div>
+
+      <StatusFilterBar
+        options={CONTRACT_STATUSES}
+        value={status}
+        onChange={(v) => {
+          setStatus(v);
+          setPage(1);
+        }}
+        counts={counts.data?.counts}
+        total={counts.data?.total}
+        isLoading={counts.isLoading}
+      />
 
       {reviewing ? (
         <div className="mb-4">
@@ -353,6 +396,24 @@ export default function ContractsPage() {
         </div>
       ) : null}
 
+      {docsFor ? (
+        <Card className="mb-4">
+          <CardHeader>
+            <CardTitle>Tài liệu hợp đồng {docsFor.contractNumber}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Attachments
+              key={docsFor.id}
+              target="CONTRACT"
+              entityId={docsFor.id}
+              canWrite={canWrite}
+              documentTypes={['Bản gốc', 'Phụ lục', 'Bản scan có dấu', 'Biên bản']}
+              emptyHint="Chưa đính kèm file hợp đồng nào."
+            />
+          </CardContent>
+        </Card>
+      ) : null}
+
       {isLoading ? (
         <div className="space-y-3">
           {Array.from({ length: 4 }).map((_, i) => (
@@ -368,16 +429,17 @@ export default function ContractsPage() {
         <Card className="overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="border-b border-border bg-muted/50 text-left">
+              <thead className="border-y border-border bg-muted/40 text-left">
                 <tr>
-                  <th className="px-4 py-3 font-medium">Số hợp đồng</th>
-                  <th className="px-4 py-3 font-medium">Tên</th>
-                  <th className="px-4 py-3 font-medium">Nhà cung cấp</th>
-                  <th className="px-4 py-3 font-medium">Hiệu lực</th>
-                  <th className="px-4 py-3 font-medium">Còn lại</th>
-                  <th className="px-4 py-3 font-medium">Giá trị</th>
-                  <th className="px-4 py-3 font-medium">Trạng thái</th>
-                  {ai.data?.enabled ? <th className="px-4 py-3 font-medium" /> : null}
+                  <th className="cell-head">Số hợp đồng</th>
+                  <th className="cell-head">Tên</th>
+                  <th className="cell-head">Nhà cung cấp</th>
+                  <th className="cell-head">Hiệu lực</th>
+                  <th className="cell-head">Còn lại</th>
+                  <th className="cell-head">Giá trị</th>
+                  <th className="cell-head">Trạng thái</th>
+                  <th className="cell-head">Tài liệu</th>
+                  {ai.data?.enabled ? <th className="cell-head" /> : null}
                 </tr>
               </thead>
               <tbody>
@@ -386,25 +448,35 @@ export default function ContractsPage() {
                     key={c.id}
                     className="border-b border-border last:border-0 hover:bg-accent/50"
                   >
-                    <td className="px-4 py-3 font-medium">{c.contractNumber}</td>
-                    <td className="max-w-56 truncate px-4 py-3">{c.title}</td>
-                    <td className="px-4 py-3 text-muted-foreground">
+                    <td className="cell font-medium">{c.contractNumber}</td>
+                    <td className="max-w-56 truncate cell">{c.title}</td>
+                    <td className="cell text-muted-foreground">
                       {c.supplier.companyName}
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground">
+                    <td className="cell text-muted-foreground">
                       {formatDate(c.startDate)} – {formatDate(c.endDate)}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="cell">
                       <DaysRemaining days={c.daysRemaining} />
                     </td>
-                    <td className="px-4 py-3 tabular-nums">
+                    <td className="cell tabular-nums">
                       {formatCurrency(c.contractValue, c.currency)}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="cell">
                       <ContractStatusBadge status={c.status} />
                     </td>
+                    <td className="cell">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setDocsFor((v) => (v?.id === c.id ? null : c))}
+                      >
+                        <Paperclip className="h-4 w-4" />
+                        {docsFor?.id === c.id ? 'Đóng' : 'Tài liệu'}
+                      </Button>
+                    </td>
                     {ai.data?.enabled ? (
-                      <td className="px-4 py-3">
+                      <td className="cell">
                         <Button
                           variant="ghost"
                           size="sm"
@@ -419,6 +491,16 @@ export default function ContractsPage() {
               </tbody>
             </table>
           </div>
+          <Pagination
+            page={page}
+            pageSize={pageSize}
+            total={data.meta.total}
+            onPageChange={setPage}
+            onPageSizeChange={(n) => {
+              setPageSize(n);
+              setPage(1);
+            }}
+          />
         </Card>
       )}
     </div>

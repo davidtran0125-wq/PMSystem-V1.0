@@ -11,7 +11,12 @@ storage/
 .env
 .env.local
 .env.*.local
+# Khóa bí mật của môi trường thật. Chỉ .env.production.example được commit.
+.env.production
 !.env.example
 
 *.tsbuildinfo
 next-env.d.ts
+
+# Clip demo sinh ra khi chạy npm run demo-clip
+demo/

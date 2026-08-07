@@ -79,6 +79,9 @@ npm run dev
 
 ## Tài khoản đăng nhập
 
+Trang đăng nhập liệt kê sẵn toàn bộ tài khoản demo kèm vai trò và mô tả — bấm
+vào một dòng là điền luôn email và mật khẩu, khỏi phải mở tài liệu này ra tra.
+
 Mật khẩu chung: `Admin@123`
 
 | Email | Vai trò | Xem được gì |
@@ -112,12 +115,15 @@ http://localhost:3000/register (chọn tab **Nhà cung cấp**), rồi đăng nh
 4. Bấm **Tạo RFQ** → chọn nhà cung cấp → **Tạo và gửi ngay**
 5. Đăng nhập bằng tài khoản nhà cung cấp → gửi báo giá
 6. Quay lại `buyer@pms.local` → **RFQ & Báo giá** → mở RFQ → xem bảng so sánh
-   (giá thấp nhất và thời gian giao ngắn nhất được tô xanh) → **Chọn** nhà cung cấp
-7. Vẫn ở trang RFQ, bấm **Tạo đơn hàng** → nhập thuế VAT, ngày giao, địa chỉ →
-   **Tạo đơn hàng (nháp)** → **Phát hành**
-8. Đăng nhập lại tài khoản nhà cung cấp → **Đơn hàng** → mở đơn →
-   **Xác nhận đơn hàng**
-9. Về `buyer@pms.local` → **Đơn hàng** → **Hoàn tất**
+   (giá thấp nhất và thời gian giao ngắn nhất được tô xanh)
+7. Kéo xuống bảng **Trao thầu theo dòng hàng** → mỗi dòng chọn một nhà cung cấp
+   (mặc định đã gợi ý bên rẻ nhất cho từng dòng) → **Trao thầu**
+8. Vẫn ở trang RFQ, bấm **Tạo đơn hàng** → tích các nhà cung cấp trúng thầu →
+   nhập thuế VAT, ngày giao, địa chỉ → **Tạo đơn hàng (nháp)** → **Phát hành**
+9. Mở chi tiết đơn hàng → **Tải PDF** để xem đơn đặt hàng in được
+10. Đăng nhập lại tài khoản nhà cung cấp → **Đơn hàng** → mở đơn →
+    **Xác nhận đơn hàng**
+11. Về `buyer@pms.local` → **Đơn hàng** → **Hoàn tất**
 
 ### Thử duyệt nhiều cấp (Phase 2)
 
@@ -134,6 +140,76 @@ Tài khoản cho 2 cấp cuối (mật khẩu `Admin@123`):
 | --- | --- |
 | `finance@pms.local` | Finance |
 | `director@pms.local` | Procurement Manager (Director) |
+
+Hai vai trò còn lại cũng có tài khoản demo: `qa@pms.local` và
+`warehouse@pms.local`.
+
+### Thử danh mục vật tư
+
+Nhóm hàng hóa bắt buộc chọn mã vật tư cho từng dòng, nhóm dịch vụ thì không.
+
+1. Đăng nhập `user@pms.local` → **Danh mục vật tư**: có sẵn 5 mã mẫu
+2. **Đề xuất mã mới** → điền tên, đơn vị tính, lý do → **Gửi đề xuất**
+   Mã hiện trong danh mục ở trạng thái *Chờ duyệt*, chưa dùng để đặt hàng được
+3. Đăng nhập `admin@pms.local` → **Danh mục vật tư** → tab **Chờ duyệt** →
+   **Duyệt**. Mã chuyển sang *Đang dùng*
+4. Quay lại `user@pms.local` → **Tạo yêu cầu** → chọn lĩnh vực *Hóa chất* →
+   ô **Mã vật tư** giờ có mã vừa duyệt. Chọn mã sẽ tự điền tên, đơn vị và giá
+   tham chiếu
+5. Đổi lĩnh vực sang *Dịch vụ*: ô mã vật tư biến mất, nhãn đổi thành
+   **Nội dung dịch vụ**
+
+Bấm biểu tượng đồng hồ ở cuối dòng `HC-NAOH-32` để xem **lịch sử đặt hàng**:
+giá bình quân gia quyền, khoảng giá, tổng hợp theo nhà cung cấp.
+
+### Thử tạo tài khoản và trang cá nhân
+
+Đăng nhập `admin@pms.local` → **Người dùng** → **Tạo tài khoản**: nhập email,
+mật khẩu ban đầu, chọn một hoặc nhiều vai trò. Trong bảng còn có nút khóa /
+mở khóa, đặt lại mật khẩu và xóa.
+
+Bấm vào **tên mình ở chân thanh bên trái** để mở **Tài khoản của tôi**: sửa
+thông tin cơ bản, đổi mật khẩu, và nút đăng xuất.
+
+### Thử đấu thầu kín
+
+Ở bước 4, mời **hai** nhà cung cấp nhưng chỉ cho **một** bên gửi báo giá.
+
+Quay lại `buyer@pms.local` → mở RFQ đó: thay cho bảng so sánh là khung vàng
+**"Giá đang được niêm phong"**, chỉ liệt kê ai đã nộp và nộp lúc nào. Bấm
+**Trao thầu** cũng không được.
+
+Bấm **Đóng nhận báo giá** — bảng so sánh và bảng chia thầu hiện ra ngay. Niêm
+phong cũng tự mở nếu quá hạn nộp, hoặc khi cả hai nhà cung cấp đều đã trả lời.
+
+### Thử chia thầu cho nhiều nhà cung cấp
+
+Ở bước 4, mời **hai** nhà cung cấp và tạo yêu cầu có **hai dòng hàng trở lên**.
+Cho mỗi bên báo giá rẻ hơn ở một dòng khác nhau.
+
+Ở bảng **Trao thầu theo dòng hàng**, chọn NCC A cho dòng 1 và NCC B cho dòng 2 —
+nút sẽ đổi thành **Chia thầu cho 2 NCC**. Sau khi chốt, màn hình tạo đơn hàng
+liệt kê cả hai bên và tạo **hai đơn hàng riêng từ cùng một yêu cầu mua**, mỗi
+đơn chỉ chứa dòng bên đó thắng.
+
+Nếu chọn cùng một dòng hàng cho hai nhà cung cấp, hệ thống sẽ báo lỗi và không
+cho lưu.
+
+### Thử tải file lên
+
+Vào **Hợp đồng** hoặc **Chứng chỉ** → bấm **Tài liệu** ở cuối dòng → kéo thả
+file vào khung. Tải lên lại đúng file trùng tên sẽ tạo **phiên bản 2**, bản cũ
+vẫn còn trong danh sách.
+
+### Thử đặt tiêu chí đánh giá riêng
+
+Đăng nhập `admin@pms.local` → **Thiết lập** → tab **Tiêu chí đánh giá NCC** →
+**Thêm tiêu chí** (đặt trọng số và thang điểm tùy ý).
+
+Sang **Đánh giá NCC** → **Chấm điểm**: tiêu chí vừa thêm xuất hiện trong form,
+mỗi tiêu chí có ô nhận xét riêng và điểm tổng được tính ngay khi chấm.
+
+Tab **Thông tin công ty** của trang Thiết lập là phần in ở đầu file PDF đơn hàng.
 
 ## Bật trợ lý AI (tùy chọn)
 
@@ -190,6 +266,23 @@ npm run db:seed
 ```
 
 Chạy xong phải thấy dòng `Seed completed`.
+
+## Web chạy chậm?
+
+`npm run dev:web` là **chế độ phát triển**: Next biên dịch từng trang ngay lúc
+bạn mở nó lần đầu, nên lần đầu vào mỗi trang mất khoảng 1,3 giây. Đó là đặc
+điểm của chế độ này, không phải hệ thống chậm.
+
+Muốn thấy tốc độ thật:
+
+```bash
+cd apps/web
+npm run build
+npm start
+```
+
+Đo trên máy này, bản build sẵn nhanh gấp đôi: tải trang đầu khoảng 0,64 giây,
+còn chuyển qua lại giữa các trang trong ứng dụng chỉ 50–150 ms.
 
 ## Lỗi thường gặp
 
