@@ -575,6 +575,23 @@ Các file phục vụ triển khai, đều đã build thử và chạy thật:
 sự chạy một truy vấn tới database, vì tiến trình còn sống mà mất kết nối
 database thì vẫn là hỏng với người dùng.
 
+### Deploy tự động từ GitHub
+
+Repo: `github.com/davidtran0125-wq/PMSystem-V1.0`. Railway nối thẳng vào repo,
+**push lên `main` là deploy**. Không có bước bấm tay, nên `main` phải luôn chạy
+được — `.github/workflows/ci.yml` lo phần đó với ba job:
+
+| Job | Nội dung |
+| --- | --- |
+| **API** | Postgres tạm → migration → lint → kiểm tra kiểu → build → seed → khởi động API → chạy cả 333 kiểm thử |
+| **Web** | Kiểm tra kiểu, lint, build |
+| **Docker** | Dựng đúng hai ảnh Railway sẽ dựng, và xác nhận `NEXT_PUBLIC_API_URL` thật sự vào được bundle gửi xuống trình duyệt |
+
+Job Docker chỉ chạy trên `main`; pull request đã có hai job kia gác.
+
+Nhớ đặt **Watch Paths** trong Railway (`apps/api/**` cho service api,
+`apps/web/**` cho web) — nếu không, sửa một dòng CSS cũng làm API khởi động lại.
+
 ## Ghi chú triển khai
 
 - Upload file: đã chạy với ổ đĩa cục bộ (`LOCAL_STORAGE_PATH`, mặc định

@@ -1,13 +1,20 @@
 name: CI
 
+# Chạy trước mỗi lần Railway deploy. Railway tự deploy khi main có commit mới,
+# nên nếu bật "Wait for CI" trong Railway thì job hỏng sẽ chặn deploy lại.
 on:
   push:
     branches: [main]
   pull_request:
 
+# Push liên tiếp lên cùng một nhánh thì chỉ chạy lần cuối, huỷ các lần đang dở.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   api:
-    name: API
+    name: API — build và 333 kiểm thử
     runs-on: ubuntu-latest
 
     services:
@@ -28,46 +35,120 @@ jobs:
       DATABASE_URL: postgresql://pms:pms_password@localhost:5432/pms_test?schema=public
       JWT_ACCESS_SECRET: ci-access-secret
       JWT_REFRESH_SECRET: ci-refresh-secret
+      CORS_ORIGIN: http://localhost:3000
+      API_PORT: 4000
+      # Các bộ kiểm thử đăng nhập bằng đúng mật khẩu này.
+      SEED_ADMIN_EMAIL: admin@pms.local
+      SEED_ADMIN_PASSWORD: Admin@123
 
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Bằng với node:22-slim trong apps/api/Dockerfile. Lệch phiên bản
+          # giữa CI và ảnh chạy thật là kiểu lỗi chỉ lộ ra sau khi deploy.
+          node-version: 22
           cache: npm
           cache-dependency-path: apps/api/package-lock.json
 
       - run: npm ci
         working-directory: apps/api
 
+      - run: npx prisma generate
+        working-directory: apps/api
+
       - run: npx prisma migrate deploy
         working-directory: apps/api
 
-      - run: npx prisma generate
+      - name: Lint
+        run: npx eslint "{src,apps,libs,test}/**/*.ts" --max-warnings 0
+        working-directory: apps/api
+
+      - name: Kiểm tra kiểu
+        run: npx tsc --noEmit
         working-directory: apps/api
 
       - run: npm run build
         working-directory: apps/api
 
+      - name: Nạp dữ liệu nền
+        run: npx prisma db seed
+        working-directory: apps/api
+
+      - name: Khởi động API nền
+        run: node dist/main.js > /tmp/api.log 2>&1 &
+        working-directory: apps/api
+
+      - name: Chờ API sẵn sàng
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:4000/api/health > /dev/null; then
+              echo "API đã sẵn sàng sau ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "API không lên sau 60 giây:"
+          cat /tmp/api.log
+          exit 1
+
+      - name: Chạy sáu bộ kiểm thử
+        run: npm run test:all
+
+      - name: Log API khi hỏng
+        if: failure()
+        run: tail -100 /tmp/api.log
+
   web:
-    name: Web
+    name: Web — build
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: apps/web/package-lock.json
 
       - run: npm ci
         working-directory: apps/web
 
-      - run: npx tsc --noEmit
+      - name: Kiểm tra kiểu
+        run: npx tsc --noEmit
         working-directory: apps/web
 
-      - run: npm run build
+      - name: Lint
+        run: npx next lint --max-warnings 0
+        working-directory: apps/web
+
+      - name: Build
+        run: npm run build
         working-directory: apps/web
         env:
+          # Chỉ để build chạy được. Giá trị thật do Railway truyền vào lúc build ảnh.
           NEXT_PUBLIC_API_URL: http://localhost:4000/api
+
+  docker:
+    name: Docker — dựng đúng hai ảnh Railway sẽ dựng
+    runs-on: ubuntu-latest
+    # Chỉ chạy trên main: dựng ảnh khá lâu, pull request đã được hai job trên gác.
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ảnh API
+        run: docker build -t pms-api:ci apps/api
+
+      - name: Ảnh web
+        run: |
+          docker build \
+            --build-arg NEXT_PUBLIC_API_URL=https://api.pmsystem.io.vn/api \
+            -t pms-web:ci apps/web
+
+      - name: Xác nhận biến API đã nhúng vào mã gửi xuống trình duyệt
+        run: |
+          docker run --rm --entrypoint sh pms-web:ci -c \
+            "grep -rq 'api.pmsystem.io.vn' .next/static" \
+            || (echo "NEXT_PUBLIC_API_URL không vào được bundle" && exit 1)

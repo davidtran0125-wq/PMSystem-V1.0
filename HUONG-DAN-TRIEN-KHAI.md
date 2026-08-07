@@ -109,7 +109,34 @@ Railway chạy cả bốn phần trong một project: Postgres, Redis, API, web.
 có sẵn `apps/api/Dockerfile`, `apps/web/Dockerfile` và hai file `railway.json`
 khai báo healthcheck — Railway tự nhận, không phải điền Build/Start Command.
 
+Cách hoạt động: Railway nối thẳng vào GitHub. **Mỗi lần bạn push lên nhánh
+`main`, Railway tự build lại và deploy** — không có bước bấm tay nào. Vì vậy
+nhánh `main` phải luôn ở trạng thái chạy được, và đó là việc của CI ở bước 0.
+
 Tổng thời gian khoảng 30 phút, trong đó chờ build mất một nửa.
+
+### Bước 0: Đưa mã lên GitHub
+
+Repo: `https://github.com/davidtran0125-wq/PMSystem-V1.0`
+
+```bash
+cd /Users/trantin/Downloads/PMS---BTM-Demo
+git add -A
+git commit -m "mô tả thay đổi"
+git push origin main
+```
+
+Repo đã có `.github/workflows/ci.yml`. Mỗi lần push, GitHub Actions chạy ba job:
+
+| Job | Làm gì | Chặn được lỗi gì |
+| --- | --- | --- |
+| **API** | Dựng Postgres tạm, chạy migration, lint, kiểm tra kiểu, build, seed, khởi động API rồi chạy **cả sáu bộ kiểm thử** (333 phép) | Migration hỏng, API không khởi động được, nghiệp vụ hoặc phân quyền sai |
+| **Web** | Kiểm tra kiểu, lint, build | Lỗi TypeScript, lỗi build của Next |
+| **Docker** | Dựng đúng hai ảnh mà Railway sẽ dựng, và kiểm tra `NEXT_PUBLIC_API_URL` có thật sự vào được bundle | Dockerfile hỏng, biến môi trường không nhúng vào mã gửi xuống trình duyệt |
+
+Job **Docker** chỉ chạy trên `main` vì nó lâu; pull request đã có hai job kia gác.
+
+Xem kết quả ở tab **Actions** của repo. Ba dấu tích xanh mới nên để Railway deploy.
 
 ### Bước 1: Tạo project và hai database
 
@@ -120,10 +147,17 @@ Không cần chép `DATABASE_URL` ra chỗ nào; ở bước sau sẽ tham chi�
 
 ### Bước 2: Deploy API
 
-1. **New** → **GitHub Repo** → chọn repo PMS
-2. Service vừa tạo → **Settings**:
+1. **New** → **GitHub Repo**
+
+   Lần đầu Railway sẽ hỏi quyền truy cập GitHub: bấm **Configure GitHub App**,
+   chọn tài khoản `davidtran0125-wq`, và cấp quyền cho **đúng repo
+   `PMSystem-V1.0`** thay vì *All repositories*. Railway chỉ cần đọc mã của
+   repo này.
+
+2. Chọn `PMSystem-V1.0` → service vừa tạo → **Settings**:
    - **Root Directory**: `apps/api`
    - Builder để nguyên **Dockerfile** (Railway đọc `apps/api/railway.json`)
+   - **Branch**: `main`
 3. **Settings → Volumes** → **Add Volume**, mount vào `/app/storage`
 
    Bỏ bước này là **mọi file hợp đồng, chứng chỉ đã tải lên sẽ mất sau lần
@@ -241,6 +275,66 @@ dig +short api.pmsystem.io.vn
 curl https://api.pmsystem.io.vn/api/health
 ```
 
+### Bước 5b: Chỉ build lại service thật sự thay đổi
+
+Mặc định Railway build lại **cả hai** service mỗi lần có commit, kể cả khi bạn
+chỉ sửa một dòng CSS. Vừa mất thời gian, vừa khiến API khởi động lại không lý do.
+
+Trong **Settings → Build** của từng service, đặt **Watch Paths**:
+
+| Service | Watch Paths |
+| --- | --- |
+| api | `apps/api/**` |
+| web | `apps/web/**` |
+
+Từ đó, sửa trong `apps/web` chỉ build lại web; sửa `apps/api` chỉ build lại API.
+
+> Có một ngoại lệ phải nhớ: khi thêm **migration mới** trong
+> `apps/api/prisma/migrations`, đường dẫn vẫn nằm trong `apps/api/**` nên API
+> vẫn build lại và `migrate deploy` vẫn chạy. Đúng như mong muốn.
+
+### Bước 5c: Quy trình làm việc hằng ngày
+
+```bash
+# 1. Làm việc trên nhánh riêng, đừng sửa thẳng main
+git checkout -b tinh-nang-moi
+
+# 2. Sửa mã, rồi kiểm tra tại chỗ trước khi đẩy lên
+cd apps/api && npx tsc --noEmit && npm run lint
+cd ../web  && npx tsc --noEmit && npx next lint
+cd ..      && npm run test:all          # cần API đang chạy ở máy
+
+# 3. Đẩy lên và mở pull request
+git push -u origin tinh-nang-moi
+```
+
+Mở pull request trên GitHub → hai job **API** và **Web** chạy tự động. Xanh hết
+thì **Merge**. Ngay khi merge vào `main`, Railway bắt đầu deploy.
+
+Muốn chắc chắn hơn, bật hai thứ này trên GitHub:
+
+- **Settings → Branches → Add rule** cho `main`: bật *Require status checks to
+  pass before merging*, chọn hai check `API` và `Web`. Từ đó không ai merge
+  được code làm hỏng kiểm thử — kể cả bạn.
+- Trong Railway, service → **Settings → Deploy** → bật **Wait for CI**. Railway
+  sẽ chờ GitHub Actions xanh rồi mới deploy, thay vì deploy song song.
+
+### Bước 5d: Khi deploy hỏng
+
+Railway giữ lại mọi bản deploy cũ. Vào tab **Deployments** của service, tìm bản
+chạy tốt gần nhất → dấu ba chấm → **Redeploy**. Web quay lại trạng thái cũ
+trong khoảng một phút.
+
+**Lưu ý về database.** Quay lại bản deploy cũ **không** hoàn tác migration đã
+chạy. Nếu bản mới có migration xoá cột, thì bản cũ chạy lại sẽ gặp database đã
+đổi cấu trúc và có thể hỏng tiếp. Vì vậy:
+
+- Migration nên **cộng thêm** chứ đừng xoá: thêm cột mới, đừng đổi tên hay xoá
+  cột đang dùng. Muốn bỏ một cột thì làm hai đợt deploy cách nhau: đợt một bỏ
+  code dùng tới nó, đợt hai mới xoá cột.
+- Trước bất kỳ migration nào đụng tới dữ liệu, sao lưu trước: service Postgres
+  → **Backups** → tạo bản thủ công.
+
 ### Bước 6: Việc phải làm ngay sau khi lên mạng
 
 1. **Đăng nhập** bằng `SEED_ADMIN_EMAIL` rồi đổi mật khẩu.
@@ -270,6 +364,10 @@ Redis, API, web) với lượng dùng nội bộ vài chục người thường 
 | Tải file lên rồi mất sau khi deploy | Chưa gắn volume vào `/app/storage`, hoặc `LOCAL_STORAGE_PATH` trỏ chỗ khác |
 | Railway không cho thêm tên miền gốc | Xem cách 1 và cách 2 ở bước 5 |
 | PDF đơn hàng lỗi font | Thư mục `assets/fonts` thiếu trong ảnh — Dockerfile đã `COPY assets`, kiểm tra file có được commit lên git chưa |
+| Push lên GitHub nhưng Railway im lặng | Railway GitHub App chưa được cấp quyền cho repo này, hoặc service đang theo dõi nhánh khác `main` |
+| Railway build lại cả hai service dù chỉ sửa một bên | Chưa đặt Watch Paths — xem bước 5b |
+| GitHub Actions đỏ ở job API | Mở log job, phần *Log API khi hỏng* in 100 dòng cuối của tiến trình API |
+| Actions xanh nhưng Railway build đỏ | Thường do file cần thiết đang bị `.gitignore`. Job **Docker** dựng đúng ảnh Railway dựng nên nếu nó xanh mà Railway đỏ, so lại biến môi trường của service |
 
 ---
 
