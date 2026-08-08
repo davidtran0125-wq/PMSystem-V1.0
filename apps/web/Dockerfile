@@ -11,8 +11,33 @@ RUN npm ci
 COPY . .
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
-RUN test -n "$NEXT_PUBLIC_API_URL" \
-    || (echo "Thiếu build arg NEXT_PUBLIC_API_URL" && exit 1)
+
+# Dừng ngay thay vì build ra một bản web gọi nhầm localhost:4000. Sai chỗ này
+# không lộ ra lúc build mà lúc người dùng bấm đăng nhập và không có gì xảy ra.
+RUN test -n "$NEXT_PUBLIC_API_URL" || { \
+      echo ""; \
+      echo "  Thiếu NEXT_PUBLIC_API_URL."; \
+      echo ""; \
+      echo "  Next nhúng biến này thẳng vào mã JavaScript gửi xuống trình"; \
+      echo "  duyệt, ngay lúc build — nên nó phải có mặt ở đây, đặt lúc chạy"; \
+      echo "  không có tác dụng."; \
+      echo ""; \
+      echo "  Trên Railway: mở service WEB (không phải api) →  tab Variables"; \
+      echo "  →  thêm:"; \
+      echo ""; \
+      echo "      NEXT_PUBLIC_API_URL=https://api.pmsystem.io.vn/api"; \
+      echo ""; \
+      echo "  Nếu tên miền api chưa trỏ DNS xong, dùng tạm địa chỉ Railway của"; \
+      echo "  service api: https://<api>.up.railway.app/api"; \
+      echo ""; \
+      echo "  Rồi bấm Redeploy — Restart không đủ, phải build lại ảnh."; \
+      echo ""; \
+      echo "  Build tại máy:"; \
+      echo "      docker build --build-arg NEXT_PUBLIC_API_URL=... -t pms-web ."; \
+      echo ""; \
+      exit 1; \
+    }
+
 RUN npm run build
 
 FROM node:22-slim

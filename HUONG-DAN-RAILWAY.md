@@ -400,6 +400,35 @@ làm thế thì không phải build lại lần nữa.
 > kèm thông báo `Thiếu build arg NEXT_PUBLIC_API_URL` thay vì lặng lẽ tạo ra một
 > bản web gọi nhầm `localhost:4000`.
 
+### 5.3b. Nếu build dừng ở "Thiếu NEXT_PUBLIC_API_URL"
+
+Railway truyền biến của service vào Docker dưới dạng build arg. Thông báo này
+nghĩa là lúc build nó rỗng. Ba nguyên nhân, theo thứ tự hay gặp:
+
+1. **Đặt nhầm service.** Biến phải nằm ở service **web**, không phải service
+   api. Hai service khác nhau có hai bộ biến riêng.
+2. **Gõ sai tên biến.** Phải đúng `NEXT_PUBLIC_API_URL` — chữ hoa toàn bộ, không
+   thừa khoảng trắng đầu/cuối giá trị.
+3. **Đặt xong nhưng chỉ Restart.** Biến này nhúng vào lúc build ảnh, nên phải
+   **Redeploy** để build lại. Restart chỉ khởi động lại ảnh cũ.
+
+Chưa có DNS cho `api.pmsystem.io.vn` thì dùng tạm địa chỉ Railway của service
+api, và nhớ thêm địa chỉ tạm của web vào `CORS_ORIGIN` của service api:
+
+```env
+# service web
+NEXT_PUBLIC_API_URL=https://api-production-xxxx.up.railway.app/api
+
+# service api — thêm địa chỉ tạm của web vào
+CORS_ORIGIN=https://pmsystem.io.vn,https://www.pmsystem.io.vn,https://web-production-yyyy.up.railway.app
+```
+
+Xong DNS thì đổi cả hai về tên miền thật rồi Redeploy lại service web.
+
+Chốt chặn này là cố ý. Không có nó, build vẫn chạy trót lọt và cho ra một bản
+web gọi `localhost:4000` — lỗi chỉ lộ ra khi người dùng bấm đăng nhập và không
+có gì xảy ra.
+
 ### 5.4. Kiểm chứng
 
 **Settings → Networking → Generate Domain**, rồi mở địa chỉ tạm đó.
@@ -759,7 +788,7 @@ Commit cả `schema.prisma` lẫn thư mục migration mới. Trên Railway,
 | Log API báo `Can't reach database server` | Chép tay `DATABASE_URL` rồi Railway xoay mật khẩu | Đổi sang cú pháp tham chiếu |
 | Trình duyệt báo lỗi CORS | `CORS_ORIGIN` sai | Đúng `https://pmsystem.io.vn,https://www.pmsystem.io.vn`, không dấu `/` cuối, không dùng `*` |
 | Web hiện được nhưng mọi lời gọi API hỏng | Ảnh web build với `NEXT_PUBLIC_API_URL` cũ | **Redeploy** service web. Restart không đủ |
-| Build web dừng với `Thiếu build arg NEXT_PUBLIC_API_URL` | Chưa đặt biến đó cho service web | Thêm vào Variables rồi Redeploy |
+| Build web dừng với `Thiếu NEXT_PUBLIC_API_URL` | Chưa đặt biến đó **cho service web** | Xem 5.3b ngay dưới |
 | Tải file lên rồi mất sau khi deploy | Chưa gắn volume, hoặc `LOCAL_STORAGE_PATH` trỏ ngoài volume | Volume mount `/app/storage`, biến đặt đúng `/app/storage` |
 | PDF đơn hàng mất dấu tiếng Việt | Thư mục `assets/fonts` không vào được ảnh | `git ls-files apps/api/assets` phải liệt kê hai file `.ttf` |
 | Railway không cho thêm tên miền gốc | Chuẩn DNS không cho CNAME ở apex | Xem bước 6.1 |
