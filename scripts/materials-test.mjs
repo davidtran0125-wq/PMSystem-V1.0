@@ -43,10 +43,16 @@ const stamp = Date.now().toString().slice(-6);
 console.log('\n=== 1. Danh mục ===');
 const list = await call('GET', '/materials?pageSize=50', { token: enduser });
 check('doc duoc danh muc', list.status === 200 && list.data.data.length >= 5, list.data.meta);
-check('co du 5 ma seed',
-  ['HC-NAOH-32', 'HC-H2SO4-98', 'BB-CAN-25L', 'BB-IBC-1000', 'MTB-BOM-CN40']
-    .every((c) => list.data.data.some((m) => m.code === c)),
-  list.data.data?.map((m) => m.code));
+// Hỏi đích danh từng mã thay vì trông chờ chúng nằm trong 50 dòng đầu. Danh
+// mục lớn dần theo thời gian, và các mã do bài kiểm thử khác sinh ra sắp xếp
+// trước mã seed sẽ đẩy chúng sang trang sau — bài này đỏ mà sản phẩm không sai.
+const SEED_CODES = ['HC-NAOH-32', 'HC-H2SO4-98', 'BB-CAN-25L', 'BB-IBC-1000', 'MTB-BOM-CN40'];
+const missing = [];
+for (const code of SEED_CODES) {
+  const hit = await call('GET', `/materials?pageSize=5&search=${encodeURIComponent(code)}`, { token: enduser });
+  if (!hit.data.data?.some((m) => m.code === code)) missing.push(code);
+}
+check('co du 5 ma seed', missing.length === 0, { thieu: missing });
 check('sap xep theo ma', list.data.data[0].code <= list.data.data[1].code,
   list.data.data.slice(0, 2).map((m) => m.code));
 

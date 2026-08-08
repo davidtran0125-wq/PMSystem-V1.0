@@ -1,4 +1,20 @@
 {
   "extends": "./tsconfig.json",
-  "exclude": ["node_modules", "test", "dist", "prisma", "**/*spec.ts"]
+  "compilerOptions": {
+    // Chốt cứng thư mục gốc của bản build. Thiếu nó, TypeScript tự suy ra thư
+    // mục cha chung của mọi file được biên dịch — thêm một file .ts ở gốc dự án
+    // là `dist/main.js` lặng lẽ thành `dist/src/main.js`, container khởi động
+    // xong rồi chết vì không tìm thấy file. Đặt ở đây chứ không ở tsconfig.json
+    // để `tsc --noEmit` vẫn kiểm được prisma.config.ts và scripts/.
+    "rootDir": "./src"
+  },
+  "exclude": [
+    "node_modules",
+    "test",
+    "dist",
+    "prisma",
+    "prisma.config.ts",
+    "scripts",
+    "**/*spec.ts"
+  ]
 }

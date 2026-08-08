@@ -4,3 +4,6 @@ storage
 .env
 .env.*
 *.log
+# Bản ghi build tăng dần: mang vào ảnh thì tsc tưởng đã build rồi và bỏ qua
+# bước ghi file, dist rỗng mà không báo lỗi gì.
+*.tsbuildinfo
