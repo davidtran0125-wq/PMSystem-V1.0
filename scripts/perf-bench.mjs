@@ -10,7 +10,7 @@
  * không phải trung bình: một lần GC hay một lần đọc đĩa lẻ không được phép làm
  * lệch kết quả.
  */
-const API = 'http://localhost:4000/api';
+const API = process.env.API_URL ?? 'http://localhost:4000/api';
 const RUNS = Number(process.env.RUNS ?? 7);
 
 async function login(email, password = 'Admin@123') {

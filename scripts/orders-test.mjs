@@ -5,7 +5,7 @@
  *   npm run db:seed && npm run dev:api
  *   npm run orders-test
  */
-const API = 'http://localhost:4000/api';
+const API = process.env.API_URL ?? 'http://localhost:4000/api';
 let pass = 0, fail = 0;
 
 async function call(method, path, { token, body } = {}) {
@@ -77,9 +77,15 @@ async function seedOrder() {
     }});
   }
   const cmp = await must('GET', `/rfqs/${rfq.id}/compare`, { token: buyer });
-  const winner = cmp.quotations.find((q) => q.supplier.email !== 'ncc-b@pms.local')
-    ?? cmp.quotations[0];
-  const loser = cmp.quotations.find((q) => q.quotationId !== winner.quotationId);
+  // Đối chiếu theo id nhà cung cấp. Bảng so sánh không trả về email, nên bản
+  // trước lọc theo `q.supplier.email` luôn khớp dòng đầu tiên — thứ tự dòng phụ
+  // thuộc dữ liệu nên bài kiểm thử lúc đúng lúc sai. Phần khẳng định bên dưới
+  // giả định NCC A trúng và NCC B thua, nên chỗ này phải đúng đích danh.
+  const winner = cmp.quotations.find((q) => q.supplier.id === sa.id);
+  const loser = cmp.quotations.find((q) => q.supplier.id === sb.id);
+  if (!winner || !loser) {
+    throw new Error('Không tìm thấy báo giá của cả hai nhà cung cấp trong bảng so sánh');
+  }
   await must('POST', `/rfqs/${rfq.id}/award`, { token: buyer, body: {
     awards: [{ quotationId: winner.quotationId }],
   }});

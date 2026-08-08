@@ -9,7 +9,7 @@
  * `meta.total` và số của một trạng thái phải khớp danh sách lọc theo trạng thái
  * đó. Nếu điều kiện lọc của hai đường tách nhau thì phép so này sẽ đỏ.
  */
-const API = 'http://localhost:4000/api';
+const API = process.env.API_URL ?? 'http://localhost:4000/api';
 let pass = 0, fail = 0;
 
 async function call(method, path, { token, body } = {}) {

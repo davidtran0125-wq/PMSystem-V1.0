@@ -7,7 +7,7 @@
  *   npm run db:seed && npm run dev:api
  *   npm run features-test
  */
-const API = 'http://localhost:4000/api';
+const API = process.env.API_URL ?? 'http://localhost:4000/api';
 let pass = 0, fail = 0;
 
 async function call(method, path, { token, body, raw } = {}) {
@@ -217,7 +217,19 @@ async function upload(target, entityId, name, type, content, token) {
   return { status: res.status, data: await res.json().catch(() => ({})) };
 }
 
-const contract = (await call('GET', '/contracts?pageSize=5', { token: buyer })).data.data[0];
+// Tự tạo hợp đồng và chứng chỉ cần dùng thay vì lấy bừa bản ghi có sẵn: trên
+// database seed sạch chưa có hợp đồng nào, mà một bài kiểm thử phụ thuộc dữ
+// liệu tình cờ có sẵn thì không phải kiểm thử.
+const anySupplier = (await must('GET', '/suppliers?status=APPROVED&pageSize=1', { token: buyer })).data[0];
+
+const contract = await must('POST', '/contracts', { token: buyer, body: {
+  contractNumber: `HD-KT-${stamp}`,
+  title: `Hop dong kiem thu ${stamp}`,
+  supplierId: anySupplier.id,
+  startDate: iso(0),
+  endDate: iso(365),
+  contractValue: 100000000,
+}});
 const up1 = await upload('CONTRACT', contract.id, `hop-dong-${stamp}.pdf`, 'application/pdf', '%PDF-1.4 noi dung', buyer);
 check('upload file cho hop dong', up1.status === 201, up1.data);
 check('phien ban dau = 1', up1.data.version === 1, up1.data.version);
@@ -229,7 +241,12 @@ check('phien ban 2 tro ve ban 1', up2.data.parentId === up1.data.id, { parent: u
 const badType = await upload('CONTRACT', contract.id, 'virus.exe', 'application/x-msdownload', 'MZ', buyer);
 check('chan dinh dang khong cho phep (400)', badType.status === 400, badType.data?.message);
 
-const cert = (await call('GET', '/certificates?pageSize=5', { token: buyer })).data.data[0];
+const cert = await must('POST', '/certificates', { token: buyer, body: {
+  name: `ISO 9001 kiem thu ${stamp}`,
+  supplierId: anySupplier.id,
+  issueDate: iso(0),
+  expiryDate: iso(365),
+}});
 const up3 = await upload('CERTIFICATE', cert.id, 'iso-9001.pdf', 'application/pdf', '%PDF-1.4 iso', buyer);
 check('upload file cho chung chi', up3.status === 201, up3.data);
 

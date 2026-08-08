@@ -10,7 +10,7 @@
  * boundaries hold (suppliers cannot see each other, requesters cannot see
  * internal buyer notes, buyers cannot read the audit log).
  */
-const API = 'http://localhost:4000/api';
+const API = process.env.API_URL ?? 'http://localhost:4000/api';
 let pass = 0, fail = 0;
 
 async function call(method, path, { token, body } = {}) {
