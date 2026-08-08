@@ -299,6 +299,18 @@ curl -o /dev/null -w "%{http_code}\n" https://api-production-xxxx.up.railway.app
 # phải là 404
 ```
 
+> **Mở địa chỉ gốc thì thấy gì?** Mọi route của API nằm sau tiền tố `api`, nên
+> `/` trả về một dòng giới thiệu:
+>
+> ```json
+> {"service":"pms-api","message":"API của Hệ thống quản lý mua hàng...","health":"/api/health"}
+> ```
+>
+> Đây cũng là cách nhanh nhất để biết một tên miền đang trỏ vào đâu: thấy JSON
+> này là API, thấy trang đăng nhập là web. Nếu mở **tên miền của web** mà lại
+> thấy JSON này, nghĩa là service web đang đặt sai **Root Directory** — phải là
+> `apps/web`, không phải `apps/api`.
+
 ---
 
 ## Bước 4 — Nạp dữ liệu nền
@@ -625,6 +637,8 @@ Commit cả `schema.prisma` lẫn thư mục migration mới. Trên Railway,
 | Custom Domain kẹt ở dấu chấm than vàng | DNS chưa lan truyền, hoặc Cloudflare đang bật proxy | `dig +short`, và chuyển mây cam về mây xám |
 | Trang web chuyển hướng vòng vô tận | Cloudflare proxy bật với SSL mode Flexible | Chuyển **DNS only**, hoặc đổi SSL mode sang **Full (strict)** |
 | Sửa một dòng CSS mà API cũng khởi động lại | Chưa đặt Watch Paths | `apps/api/**` và `apps/web/**` |
+| Mở tên miền api thấy `Cannot GET /` | Bản cũ chưa có trang giới thiệu ở `/` | Bình thường, không phải lỗi. Kiểm tra ở `/api/health`. Bản mới trả về JSON `{"service":"pms-api",...}` |
+| Mở tên miền **web** mà thấy JSON `{"service":"pms-api"}` | Service web đặt sai Root Directory | Đổi thành `apps/web` rồi Redeploy |
 | GitHub Actions đỏ ở job API | Xem bước *Log API khi hỏng* trong job, có 100 dòng log cuối | |
 | Actions xanh nhưng Railway build đỏ | Thường do file cần thiết bị `.gitignore` | Job **Docker** dựng đúng ảnh Railway dựng; nếu nó xanh mà Railway đỏ thì so lại biến môi trường của service |
 
