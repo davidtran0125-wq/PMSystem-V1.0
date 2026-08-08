@@ -430,7 +430,59 @@ Hai cách xử lý:
 
 Dưới đây trình bày **cách A**.
 
+### 6.1b. Cách nhận ra mình đã đặt CNAME sai chỗ
+
+Nếu trình duyệt báo **`DNS_PROBE_FINISHED_NXDOMAIN`**, chạy ba lệnh này để biết
+hỏng ở đâu thay vì đoán:
+
+```bash
+# 1. Ai đang phục vụ DNS cho tên miền?
+dig @e.dns-servers.vn pmsystem.io.vn NS +short
+
+# 2. Hỏi thẳng nameserver đó, bỏ qua mọi bộ nhớ đệm
+dig @<nameserver-vừa-tìm-được> pmsystem.io.vn A
+
+# 3. Các tên con đã tồn tại chưa?
+dig @<nameserver-vừa-tìm-được> www.pmsystem.io.vn A
+dig @<nameserver-vừa-tìm-được> api.pmsystem.io.vn A
+```
+
+Đọc kết quả:
+
+| Thấy gì | Nghĩa là |
+| --- | --- |
+| `status: NXDOMAIN` | Bản ghi **chưa được tạo**. Đây là nguyên nhân của `DNS_PROBE_FINISHED_NXDOMAIN` |
+| `status: NOERROR` nhưng phần ANSWER trống | Tên có tồn tại nhưng **không có bản ghi loại đó** |
+| `ANSWER SECTION` có `CNAME` ngay tại `pmsystem.io.vn.` | **Sai.** Xem ngay bên dưới |
+
+Nếu ở tên miền gốc xuất hiện dòng như:
+
+```
+pmsystem.io.vn.   14400   IN   CNAME   xxxxx.up.railway.app.
+```
+
+thì bản ghi đó phải xóa. Chuẩn DNS quy định: **chỗ nào đã có CNAME thì không
+được có bất kỳ loại bản ghi nào khác ở đó** — mà tên miền gốc bắt buộc phải có
+sẵn SOA và NS. Hai điều này mâu thuẫn nhau, nên mỗi máy chủ DNS trên đường
+truyền xử lý một kiểu: chỗ trả về CNAME, chỗ trả về rỗng, chỗ báo lỗi. Trang web
+sẽ lúc vào được lúc không, tùy người dùng đang dùng nhà mạng nào.
+
+Nhiều trang quản trị DNS **vẫn cho bạn bấm lưu** bản ghi này mà không cảnh báo
+gì. Lưu được không có nghĩa là đúng.
+
+### 6.1c. Cẩn thận: đừng trỏ bản ghi A vào IP của Railway
+
+Khi thấy CNAME không đặt được ở gốc, phản xạ tự nhiên là tra IP của
+`xxxxx.up.railway.app` rồi tạo bản ghi A trỏ thẳng vào IP đó. **Đừng làm vậy.**
+Railway không cam kết giữ nguyên IP; hôm nào họ đổi là trang web chết, và bạn sẽ
+không biết vì sao vì DNS vẫn "có bản ghi".
+
 ### 6.2. Chuyển DNS sang Cloudflare
+
+> Nếu tên miền đang dùng DNS của nhà đăng ký (Vinahost, iNET, PA Việt Nam…) thì
+> **xóa bản ghi CNAME ở gốc trước**, rồi mới làm bước này. Để lại nó thì sau khi
+> đổi nameserver, bản ghi cũ vẫn còn trong bộ nhớ đệm của các máy chủ DNS trên
+> mạng thêm vài giờ nữa.
 
 1. Tạo tài khoản tại https://dash.cloudflare.com (gói Free là đủ)
 2. **Add a site** → nhập `pmsystem.io.vn` → chọn gói **Free**
@@ -478,6 +530,31 @@ là lý do chọn Cloudflare.
 dig +short pmsystem.io.vn
 dig +short api.pmsystem.io.vn
 ```
+
+> **Vì sao vừa tạo bản ghi xong mà vẫn báo NXDOMAIN?**
+>
+> DNS nhớ cả câu trả lời phủ định. Trường cuối trong bản ghi SOA của
+> `pmsystem.io.vn` là **86400 giây — một ngày**. Nghĩa là máy chủ DNS nào đã
+> từng hỏi `api.pmsystem.io.vn` và nhận NXDOMAIN thì sẽ giữ câu trả lời đó tới
+> 24 giờ, kể cả sau khi bạn đã tạo bản ghi.
+>
+> Cách kiểm tra mà không bị bộ nhớ đệm đánh lừa — hỏi thẳng nguồn:
+>
+> ```bash
+> dig @ns3.vinahost.vn api.pmsystem.io.vn A     # hoặc nameserver của bạn
+> ```
+>
+> Và xóa bộ nhớ đệm trên máy mình:
+>
+> ```bash
+> sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder   # macOS
+> ```
+>
+> Trình duyệt cũng có bộ nhớ riêng: mở `chrome://net-internals/#dns` → **Clear
+> host cache**, hoặc thử bằng cửa sổ ẩn danh.
+>
+> Muốn tránh phải chờ lâu ở những lần sau, hạ TTL của bản ghi xuống 300 giây
+> **trước khi** định sửa chúng.
 
 Cả hai phải trả về địa chỉ `up.railway.app` hoặc IP tương ứng.
 
@@ -635,6 +712,9 @@ Commit cả `schema.prisma` lẫn thư mục migration mới. Trên Railway,
 | PDF đơn hàng mất dấu tiếng Việt | Thư mục `assets/fonts` không vào được ảnh | `git ls-files apps/api/assets` phải liệt kê hai file `.ttf` |
 | Railway không cho thêm tên miền gốc | Chuẩn DNS không cho CNAME ở apex | Xem bước 6.1 |
 | Custom Domain kẹt ở dấu chấm than vàng | DNS chưa lan truyền, hoặc Cloudflare đang bật proxy | `dig +short`, và chuyển mây cam về mây xám |
+| `DNS_PROBE_FINISHED_NXDOMAIN` | Bản ghi cho tên đó **chưa được tạo** | `dig @<nameserver> <tên> A` → xem mục 6.1b |
+| Gốc lúc vào được lúc không, tên con báo NXDOMAIN | Đặt CNAME ngay tại tên miền gốc — chuẩn DNS không cho | Xóa nó, xem mục 6.1 và 6.1b |
+| Đã tạo bản ghi rồi vẫn NXDOMAIN | Bộ nhớ đệm phủ định, tới 24 giờ theo SOA | Hỏi thẳng nameserver, xóa cache máy và trình duyệt — mục 6.5 |
 | Trang web chuyển hướng vòng vô tận | Cloudflare proxy bật với SSL mode Flexible | Chuyển **DNS only**, hoặc đổi SSL mode sang **Full (strict)** |
 | Sửa một dòng CSS mà API cũng khởi động lại | Chưa đặt Watch Paths | `apps/api/**` và `apps/web/**` |
 | Mở tên miền api thấy `Cannot GET /` | Bản cũ chưa có trang giới thiệu ở `/` | Bình thường, không phải lỗi. Kiểm tra ở `/api/health`. Bản mới trả về JSON `{"service":"pms-api",...}` |
