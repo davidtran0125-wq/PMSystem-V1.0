@@ -583,19 +583,63 @@ dấu `/` ở cuối.
 Đây không phải bước tùy chọn. Ngay lúc này hệ thống đang mở công khai với một
 danh sách tài khoản mà mật khẩu nằm trong README trên GitHub.
 
-### 7.1. Đổi mật khẩu quản trị
+### 7.1. Tạo tài khoản quản trị thật
 
-Đăng nhập → góc phải trên → **Tài khoản của tôi** → đổi mật khẩu.
+Tài khoản do seed tạo ra (`admin@pms.local`) là tài khoản demo: email không có
+thật và mật khẩu nằm công khai trong README. Tạo một tài khoản bằng email thật
+của bạn:
+
+```bash
+cd apps/api
+railway link                    # chọn project pmsystem → service api
+railway run npm run create-admin
+```
+
+Script hỏi email, họ tên và mật khẩu. Mật khẩu **không hiện lên màn hình** và
+**không nhận qua tham số dòng lệnh** — tham số sẽ nằm lại trong lịch sử shell
+và hiện ra với mọi tiến trình khác trên máy qua lệnh `ps`.
+
+Yêu cầu mật khẩu chặt hơn mức tối thiểu của API (8 ký tự), vì đây là tài khoản
+làm được mọi thứ kể cả xem toàn bộ giá và xóa dữ liệu:
+
+- ít nhất 12 ký tự
+- không được toàn chữ số
+- không chứa chuỗi quá phổ biến
+
+Kết quả: tài khoản `SUPER_ADMIN`, trạng thái `ACTIVE`, đăng nhập được ngay.
+
+Vài trường hợp khác:
+
+```bash
+# Điền sẵn email và tên, chỉ hỏi mật khẩu
+railway run npm run create-admin -- --email sep@congty.vn --name "Tran Van Sep"
+
+# Quên mật khẩu, đặt lại. Mọi phiên đang mở của tài khoản đó bị cắt.
+railway run npm run create-admin -- --reset-password --email sep@congty.vn
+
+# Tạo admin thật và khóa luôn tài khoản demo trong một lần
+railway run npm run create-admin -- --disable-demo
+```
 
 ### 7.2. Khóa toàn bộ tài khoản demo
 
-Vào **Người dùng**, khóa tám tài khoản sau:
+```bash
+railway run npm run create-admin -- --disable-demo
+```
 
-`buyer@pms.local`, `user@pms.local`, `ncc-a@pms.local`, `ncc-b@pms.local`,
-`finance@pms.local`, `director@pms.local`, `qa@pms.local`, `warehouse@pms.local`
+Lệnh này khóa cả chín tài khoản demo (`admin@`, `buyer@`, `user@`, `ncc-a@`,
+`ncc-b@`, `finance@`, `director@`, `qa@`, `warehouse@`). Tất cả đều dùng mật
+khẩu `Admin@123`, và mật khẩu đó **đang hiện ngay trên màn hình đăng nhập**.
 
-Tất cả đều dùng mật khẩu `Admin@123`, và mật khẩu đó **đang hiện ngay trên màn
-hình đăng nhập**.
+Khóa chứ không xóa, để lịch sử duyệt và bình luận cũ vẫn còn người đứng tên.
+Chạy lại lần nữa cũng không sao — nó nhận ra và báo đã khóa từ trước.
+
+Làm bằng tay cũng được: vào **Người dùng** rồi khóa từng tài khoản. Nhưng chín
+tài khoản làm tay thì dễ sót một, mà sót một là đủ.
+
+> **Làm bước 7.1 trước 7.2.** Khóa hết demo khi chưa có admin thật là tự khóa
+> mình ra ngoài. Nếu lỡ rồi thì vẫn cứu được bằng `railway run npm run
+> create-admin` — script nói chuyện thẳng với database, không cần đăng nhập.
 
 ### 7.3. Gỡ khối tài khoản demo khỏi màn hình đăng nhập
 

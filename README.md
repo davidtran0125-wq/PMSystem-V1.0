@@ -576,6 +576,16 @@ Các file phục vụ triển khai, đều đã build thử và chạy thật:
 | `.github/workflows/ci.yml` | Gác cổng trước khi Railway deploy |
 | `.env.production.example` | Mẫu biến môi trường (`.env.production` đã nằm trong `.gitignore`) |
 
+**Tạo tài khoản quản trị thật** (không dùng tài khoản demo của seed):
+
+```bash
+cd apps/api && npm run create-admin
+npm run create-admin -- --disable-demo     # khóa 9 tài khoản demo
+```
+
+Mật khẩu được hỏi trực tiếp, không hiện lên màn hình và không nhận qua tham số
+dòng lệnh. Chạy trên Railway bằng `railway run npm run create-admin`.
+
 `GET /api/health` là endpoint công khai để nền tảng kiểm tra sức khỏe: nó thật
 sự chạy một truy vấn tới database, vì tiến trình còn sống mà mất kết nối
 database thì vẫn là hỏng với người dùng.
