@@ -1,3 +1,4 @@
+import { EmptyToUndefined } from '../../../common/dto/transforms';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
   ArrayUnique,
@@ -21,6 +22,7 @@ export class UpdateSupplierProfileDto {
 
   @ApiPropertyOptional()
   @IsOptional()
+  @EmptyToUndefined()
   @IsString()
   @MaxLength(50)
   taxCode?: string;

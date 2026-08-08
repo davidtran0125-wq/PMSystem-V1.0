@@ -641,7 +641,14 @@ tài khoản làm tay thì dễ sót một, mà sót một là đủ.
 > mình ra ngoài. Nếu lỡ rồi thì vẫn cứu được bằng `railway run npm run
 > create-admin` — script nói chuyện thẳng với database, không cần đăng nhập.
 
-### 7.3. Gỡ khối tài khoản demo khỏi màn hình đăng nhập
+### 7.3. Ai được tự đăng ký
+
+Chỉ **nhà cung cấp** tự đăng ký được, và hồ sơ vào trạng thái chờ duyệt — không
+tự vào hệ thống ngay. Tài khoản nhân viên do bạn tạo trong mục **Người dùng**.
+
+Không cần cấu hình gì thêm, đây là hành vi mặc định của mã nguồn.
+
+### 7.4. Gỡ khối tài khoản demo khỏi màn hình đăng nhập
 
 Sửa `apps/web/src/app/login/page.tsx`, xóa phần liệt kê tài khoản mẫu, rồi:
 
@@ -652,10 +659,11 @@ git push origin main
 
 Railway tự deploy lại.
 
-### 7.4. Kiểm tra lần cuối
+### 7.5. Kiểm tra lần cuối
 
 | Việc | Cách kiểm |
 | --- | --- |
+| Nhân viên không tự đăng ký được | `curl -X POST https://api.pmsystem.io.vn/api/auth/register -d '{}' -H 'Content-Type: application/json'` → **404** |
 | Swagger đã tắt | `curl -o /dev/null -w "%{http_code}\n" https://api.pmsystem.io.vn/docs` → `404` |
 | File đính kèm sống sót qua deploy | Vào **Hợp đồng**, tải lên một file, bấm **Redeploy** trên service api, quay lại xem file còn không |
 | PDF tiếng Việt có dấu | Vào **Đơn hàng** → **Tải PDF** |

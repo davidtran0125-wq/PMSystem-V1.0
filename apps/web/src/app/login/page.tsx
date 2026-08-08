@@ -188,10 +188,12 @@ export default function LoginPage() {
         </div>
 
         <p className="mt-4 text-center text-sm text-muted-foreground">
-          Chưa có tài khoản?{' '}
+          Là nhà cung cấp và chưa có tài khoản?{' '}
           <Link href="/register" className="font-medium text-primary hover:underline">
             Đăng ký
           </Link>
+          <br />
+          Nhân viên nội bộ: liên hệ quản trị viên để được cấp tài khoản.
         </p>
       </div>
     </div>

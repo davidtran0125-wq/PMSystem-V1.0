@@ -1,9 +1,10 @@
 import { RequestMethod, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { NestFactory } from '@nestjs/core';
+import { HttpAdapterHost, NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { PrismaExceptionFilter } from './common/prisma-exception.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -49,6 +50,12 @@ async function bootstrap() {
       SwaggerModule.createDocument(app, swaggerConfig),
     );
   }
+
+  // Lỗi ràng buộc của Prisma là chuyện thường ngày (nhập trùng mã), không phải
+  // sự cố hệ thống — trả về 409/404 thay vì 500 kèm vết ngăn xếp.
+  app.useGlobalFilters(
+    new PrismaExceptionFilter(app.get(HttpAdapterHost).httpAdapter),
+  );
 
   // Cho phép Nest chạy hook onModuleDestroy khi nhận SIGTERM, tránh cắt ngang
   // request đang xử lý lúc deploy.

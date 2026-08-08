@@ -576,6 +576,12 @@ Các file phục vụ triển khai, đều đã build thử và chạy thật:
 | `.github/workflows/ci.yml` | Gác cổng trước khi Railway deploy |
 | `.env.production.example` | Mẫu biến môi trường (`.env.production` đã nằm trong `.gitignore`) |
 
+**Ai được tự đăng ký.** Chỉ nhà cung cấp — `POST /auth/register/supplier`, hồ sơ
+vào trạng thái chờ bộ phận mua hàng duyệt. Tài khoản nhân viên do quản trị viên
+tạo trong mục **Người dùng**. Trước đây có thêm `POST /auth/register` mở công
+khai, nghĩa là bất kỳ ai trên internet cũng tạo được tài khoản đọc được danh mục
+vật tư, cơ cấu phòng ban và đẩy yêu cầu mua hàng vào hàng chờ duyệt.
+
 **Tạo tài khoản quản trị thật** (không dùng tài khoản demo của seed):
 
 ```bash

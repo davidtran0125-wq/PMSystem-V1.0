@@ -3,12 +3,7 @@ import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { AuthService } from './auth.service';
-import {
-  LoginDto,
-  RefreshTokenDto,
-  RegisterDto,
-  SupplierRegisterDto,
-} from './dto/auth.dto';
+import { LoginDto, RefreshTokenDto, SupplierRegisterDto } from './dto/auth.dto';
 import { CurrentUser, Public } from '../../common/decorators';
 
 /**
@@ -31,14 +26,14 @@ const CREDENTIAL_LIMIT = {
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
-  @Public()
-  @Throttle(CREDENTIAL_LIMIT)
-  @Post('register')
-  @ApiOperation({ summary: 'Register an end user account' })
-  register(@Body() dto: RegisterDto, @Req() req: Request) {
-    return this.authService.register(dto, this.meta(req));
-  }
-
+  /**
+   * Chỉ nhà cung cấp mới tự đăng ký được, và hồ sơ vào trạng thái chờ duyệt.
+   *
+   * Tài khoản nhân viên do quản trị viên tạo trong mục Người dùng
+   * (`POST /users`, cần quyền `user:write`). Trước đây có `POST /auth/register`
+   * mở công khai: bất kỳ ai trên internet cũng tạo được tài khoản đọc được danh
+   * mục vật tư, cơ cấu phòng ban, và đẩy yêu cầu mua hàng vào hàng chờ duyệt.
+   */
   @Public()
   @Throttle(CREDENTIAL_LIMIT)
   @Post('register/supplier')

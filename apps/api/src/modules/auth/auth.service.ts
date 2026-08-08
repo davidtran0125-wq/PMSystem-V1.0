@@ -11,7 +11,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CodeGeneratorService } from '../../common/code-generator.service';
 import { ROLES } from '../../common/permissions';
-import { LoginDto, RegisterDto, SupplierRegisterDto } from './dto/auth.dto';
+import { LoginDto, SupplierRegisterDto } from './dto/auth.dto';
 
 interface RequestMeta {
   ipAddress?: string;
@@ -26,31 +26,6 @@ export class AuthService {
     private readonly config: ConfigService,
     private readonly codes: CodeGeneratorService,
   ) {}
-
-  async register(dto: RegisterDto, meta: RequestMeta) {
-    const existing = await this.prisma.user.findUnique({
-      where: { email: dto.email },
-    });
-    if (existing) throw new ConflictException('Email is already registered');
-
-    const role = await this.prisma.role.findUniqueOrThrow({
-      where: { code: ROLES.END_USER },
-    });
-
-    const user = await this.prisma.user.create({
-      data: {
-        email: dto.email,
-        passwordHash: await bcrypt.hash(dto.password, 12),
-        fullName: dto.fullName,
-        phone: dto.phone,
-        departmentId: dto.departmentId,
-        status: UserStatus.ACTIVE,
-        roles: { create: { roleId: role.id } },
-      },
-    });
-
-    return this.issueTokens(user.id, user.email, meta);
-  }
 
   async registerSupplier(dto: SupplierRegisterDto, meta: RequestMeta) {
     const existing = await this.prisma.user.findUnique({

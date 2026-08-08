@@ -1,9 +1,9 @@
+import { EmptyToUndefined } from '../../../common/dto/transforms';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsEmail,
   IsOptional,
   IsString,
-  IsUUID,
   MaxLength,
   MinLength,
 } from 'class-validator';
@@ -17,33 +17,6 @@ export class LoginDto {
   @IsString()
   @MinLength(8)
   password!: string;
-}
-
-export class RegisterDto {
-  @ApiProperty()
-  @IsEmail()
-  email!: string;
-
-  @ApiProperty({ minLength: 8 })
-  @IsString()
-  @MinLength(8)
-  @MaxLength(72)
-  password!: string;
-
-  @ApiProperty()
-  @IsString()
-  @MaxLength(150)
-  fullName!: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  phone?: string;
-
-  @ApiPropertyOptional({ description: 'Department the requester belongs to' })
-  @IsOptional()
-  @IsUUID()
-  departmentId?: string;
 }
 
 export class SupplierRegisterDto {
@@ -67,13 +40,17 @@ export class SupplierRegisterDto {
   @MaxLength(200)
   companyName!: string;
 
+  // Ô để trống gửi lên chuỗi rỗng; `taxCode` là cột duy nhất nên chuỗi rỗng thứ
+  // hai sẽ va vào ràng buộc và làm hỏng đăng ký của mọi nhà cung cấp sau đó.
   @ApiPropertyOptional()
   @IsOptional()
+  @EmptyToUndefined()
   @IsString()
   taxCode?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
+  @EmptyToUndefined()
   @IsString()
   phone?: string;
 }
