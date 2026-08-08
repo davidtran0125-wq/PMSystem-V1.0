@@ -55,8 +55,11 @@ Sinh chuỗi ngẫu nhiên:
 node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
 ```
 
-Chạy hai lần, lấy hai chuỗi khác nhau cho `JWT_ACCESS_SECRET` và
-`JWT_REFRESH_SECRET`.
+Dùng chuỗi này cho `JWT_ACCESS_SECRET`.
+
+Không có `JWT_REFRESH_SECRET`: refresh token không phải JWT mà là chuỗi ngẫu
+nhiên 48 byte, chỉ lưu bản băm SHA-256 trong database và xoay vòng mỗi lần dùng.
+Biến đó có trong `.env.example` nhưng code không đọc tới.
 
 ### 2. Đổi mật khẩu tài khoản mẫu
 
@@ -71,7 +74,6 @@ khoản demo (`buyer@`, `user@`, `ncc-a@`…) trong mục **Người dùng**.
 | `NODE_ENV` | `production` | Tự tắt Swagger |
 | `DATABASE_URL` | Chuỗi kết nối của dịch vụ | Nên có `?sslmode=require` |
 | `JWT_ACCESS_SECRET` | Chuỗi ngẫu nhiên | Bí mật |
-| `JWT_REFRESH_SECRET` | Chuỗi ngẫu nhiên khác | Bí mật |
 | `CORS_ORIGIN` | `https://pmsystem.io.vn,https://www.pmsystem.io.vn` | Đúng tên miền web, có `https://`, không có `/` cuối |
 | `NEXT_PUBLIC_API_URL` | `https://api.pmsystem.io.vn/api` | Web gọi tới đây. **Phải có mặt lúc build**, đặt lúc chạy không có tác dụng |
 | `API_PORT` | `4000` hoặc `${PORT}` | Railway/Render tự cấp `PORT` |
@@ -105,9 +107,17 @@ hai lệnh đó xóa sạch database.
 
 ## Cách đang dùng — Railway + pmsystem.io.vn
 
-Railway chạy cả bốn phần trong một project: Postgres, Redis, API, web. Repo đã
-có sẵn `apps/api/Dockerfile`, `apps/web/Dockerfile` và hai file `railway.json`
-khai báo healthcheck — Railway tự nhận, không phải điền Build/Start Command.
+> **Cần hướng dẫn từng bước, có kiểm chứng sau mỗi bước?**
+> Xem [HUONG-DAN-RAILWAY.md](HUONG-DAN-RAILWAY.md) — chi tiết hơn hẳn, gồm cả
+> cách chuyển DNS sang Cloudflare cho tên miền gốc và bảng tra lỗi đầy đủ.
+> Mục dưới đây là bản tóm tắt.
+
+Railway chạy ba service trong một project: Postgres, API, web. Repo đã có sẵn
+`apps/api/Dockerfile`, `apps/web/Dockerfile` và hai file `railway.json` khai báo
+healthcheck — Railway tự nhận, không phải điền Build/Start Command.
+
+Không cần Redis: gói `bullmq`/`ioredis` đã cài nhưng chưa module nào nối tới,
+hàng đợi nhắc hạn hiện do `@nestjs/schedule` quét.
 
 Cách hoạt động: Railway nối thẳng vào GitHub. **Mỗi lần bạn push lên nhánh
 `main`, Railway tự build lại và deploy** — không có bước bấm tay nào. Vì vậy
@@ -138,10 +148,9 @@ Job **Docker** chỉ chạy trên `main` vì nó lâu; pull request đã có hai
 
 Xem kết quả ở tab **Actions** của repo. Ba dấu tích xanh mới nên để Railway deploy.
 
-### Bước 1: Tạo project và hai database
+### Bước 1: Tạo project và database
 
 1. https://railway.app → **New Project** → **Deploy PostgreSQL**
-2. Trong project đó → **New** → **Database** → **Add Redis**
 
 Không cần chép `DATABASE_URL` ra chỗ nào; ở bước sau sẽ tham chiếu tới nó.
 
@@ -168,13 +177,10 @@ Không cần chép `DATABASE_URL` ra chỗ nào; ở bước sau sẽ tham chi�
 NODE_ENV=production
 API_PREFIX=api
 DATABASE_URL=${{Postgres.DATABASE_URL}}
-REDIS_HOST=${{Redis.REDISHOST}}
-REDIS_PORT=${{Redis.REDISPORT}}
 LOCAL_STORAGE_PATH=/app/storage
 CORS_ORIGIN=https://pmsystem.io.vn,https://www.pmsystem.io.vn
 JWT_ACCESS_SECRET=<dán chuỗi ngẫu nhiên>
 JWT_ACCESS_EXPIRES_IN=15m
-JWT_REFRESH_SECRET=<dán chuỗi ngẫu nhiên khác>
 JWT_REFRESH_EXPIRES_IN=7d
 THROTTLE_TTL=60
 THROTTLE_LIMIT=120
@@ -190,7 +196,10 @@ ANTHROPIC_API_KEY=
    bằng giá trị thật, và tự cập nhật nếu Railway đổi thông tin kết nối. Chép tay
    thì lần Railway xoay mật khẩu là API chết.
 
-   Sinh khóa bí mật: `openssl rand -base64 48`, chạy hai lần lấy hai chuỗi khác nhau.
+   Sinh khóa bí mật: `openssl rand -base64 48`.
+
+   Không có `JWT_REFRESH_SECRET`: refresh token ở đây không phải JWT mà là chuỗi
+   ngẫu nhiên 48 byte, chỉ lưu bản băm SHA-256 và xoay vòng mỗi lần dùng.
 
    **Không** đặt `PORT` hay `API_PORT` — Railway tự cấp `PORT`, và API đã ưu tiên
    đọc biến đó.
@@ -350,8 +359,8 @@ chạy. Nếu bản mới có migration xoá cột, thì bản cũ chạy lại 
 
 ### Chi phí ước tính
 
-Gói Hobby 5 USD/tháng đã gồm 5 USD tiền tài nguyên. Bốn service (Postgres,
-Redis, API, web) với lượng dùng nội bộ vài chục người thường rơi vào khoảng
+Gói Hobby 5 USD/tháng đã gồm 5 USD tiền tài nguyên. Ba service (Postgres,
+API, web) với lượng dùng nội bộ vài chục người thường rơi vào khoảng
 10–20 USD/tháng. Volume tính riêng theo dung lượng.
 
 ### Khi có trục trặc
@@ -380,7 +389,7 @@ sẵn các file cho việc này, không cần chép đoạn mã nào từ tài l
 | --- | --- |
 | `apps/api/Dockerfile` | Ảnh API. Đã kèm font tiếng Việt cho PDF, tự chạy `migrate deploy` khi khởi động |
 | `apps/web/Dockerfile` | Ảnh web, bản `standalone` của Next |
-| `docker-compose.prod.yml` | Postgres + Redis + API + web + Caddy |
+| `docker-compose.prod.yml` | Postgres + API + web + Caddy |
 | `Caddyfile` | HTTPS tự động cho `pmsystem.io.vn` và `api.pmsystem.io.vn` |
 | `.env.production.example` | Mẫu biến môi trường, chép thành `.env.production` |
 
@@ -433,13 +442,12 @@ cp .env.production.example .env.production
 # Sinh ba chuỗi bí mật khác nhau
 openssl rand -base64 48   # → POSTGRES_PASSWORD
 openssl rand -base64 48   # → JWT_ACCESS_SECRET
-openssl rand -base64 48   # → JWT_REFRESH_SECRET
 
 nano .env.production
 ```
 
 Bắt buộc phải điền: `POSTGRES_PASSWORD`, `JWT_ACCESS_SECRET`,
-`JWT_REFRESH_SECRET`, `SEED_ADMIN_PASSWORD`. Những biến còn lại đã có giá trị
+`SEED_ADMIN_PASSWORD`. Những biến còn lại đã có giá trị
 đúng cho tên miền này.
 
 `.env.production` đã nằm trong `.gitignore` — đừng commit nó.

@@ -34,7 +34,6 @@ jobs:
     env:
       DATABASE_URL: postgresql://pms:pms_password@localhost:5432/pms_test?schema=public
       JWT_ACCESS_SECRET: ci-access-secret
-      JWT_REFRESH_SECRET: ci-refresh-secret
       CORS_ORIGIN: http://localhost:3000
       API_PORT: 4000
       # Các bộ kiểm thử đăng nhập bằng đúng mật khẩu này.

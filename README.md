@@ -558,8 +558,12 @@ Những chỗ đã xử lý trước để không thành nút thắt khi dữ li
 
 ## Đưa lên mạng
 
-Tên miền: **pmsystem.io.vn**. Cách triển khai đang dùng là **Railway**; từng
-bước nằm trong [HUONG-DAN-TRIEN-KHAI.md](HUONG-DAN-TRIEN-KHAI.md).
+Tên miền: **pmsystem.io.vn**. Cách triển khai đang dùng là **Railway**.
+
+- [HUONG-DAN-RAILWAY.md](HUONG-DAN-RAILWAY.md) — từng bước, có kiểm chứng sau
+  mỗi bước và bảng tra lỗi. Đọc cái này khi thực sự triển khai.
+- [HUONG-DAN-TRIEN-KHAI.md](HUONG-DAN-TRIEN-KHAI.md) — so sánh các phương án và
+  cách chạy trên VPS riêng.
 
 Các file phục vụ triển khai, đều đã build thử và chạy thật:
 
@@ -569,6 +573,7 @@ Các file phục vụ triển khai, đều đã build thử và chạy thật:
 | `apps/web/Dockerfile` | Ảnh web, bản `standalone` của Next. Dừng build nếu thiếu `NEXT_PUBLIC_API_URL` |
 | `apps/api/railway.json`, `apps/web/railway.json` | Khai báo builder và healthcheck cho Railway |
 | `docker-compose.prod.yml` + `Caddyfile` | Phương án VPS riêng, HTTPS tự động |
+| `.github/workflows/ci.yml` | Gác cổng trước khi Railway deploy |
 | `.env.production.example` | Mẫu biến môi trường (`.env.production` đã nằm trong `.gitignore`) |
 
 `GET /api/health` là endpoint công khai để nền tảng kiểm tra sức khỏe: nó thật

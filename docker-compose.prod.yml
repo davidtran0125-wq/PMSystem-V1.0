@@ -35,16 +35,18 @@ services:
       timeout: 5s
       retries: 5
 
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    volumes:
-      - redisdata:/data
-    healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
-      interval: 10s
-      timeout: 5s
-      retries: 5
+  # Redis chưa có ở đây là cố ý. Gói bullmq/ioredis đã cài nhưng chưa module nào
+  # trong `apps/api/src` nối tới — bảng `reminder_queue` hiện do @nestjs/schedule
+  # quét. Thêm service Redis lúc này chỉ là một container chạy không. Khi worker
+  # BullMQ được nối thật thì bỏ comment khối dưới:
+  #
+  # redis:
+  #   image: redis:7-alpine
+  #   restart: unless-stopped
+  #   volumes: [redisdata:/data]
+  #   healthcheck:
+  #     test: ['CMD', 'redis-cli', 'ping']
+  #     interval: 10s
 
   api:
     build:
@@ -54,12 +56,9 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
       CORS_ORIGIN: https://pmsystem.io.vn,https://www.pmsystem.io.vn
     depends_on:
       postgres: { condition: service_healthy }
-      redis: { condition: service_healthy }
     volumes:
       # File đính kèm phải sống ngoài container, nếu không mỗi lần deploy lại là mất.
       - storage:/app/storage
@@ -88,7 +87,6 @@ services:
 
 volumes:
   pgdata:
-  redisdata:
   storage:
   caddydata:
   caddyconfig:
